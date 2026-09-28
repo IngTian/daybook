@@ -4,6 +4,16 @@ on:
   push:
     branches: [main]
   pull_request:
+  # Daily, because this suite can break with nothing pushed. Several tests seed a dated row
+  # and read it back through a window anchored on *today*, so the calendar alone can move a
+  # fixture out of view — it has happened six times. On 2026-09-28 eight tests were failing
+  # on main and the last CI run, from 2026-09-15, was green: push-triggered CI cannot see a
+  # failure that the passage of time caused. A nightly run turns "someone eventually pushes"
+  # into "we know within a day".
+  schedule:
+    - cron: "17 6 * * *"
+  # So a red nightly can be re-checked after a fix without an empty commit.
+  workflow_dispatch:
 
 jobs:
   test:

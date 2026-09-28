@@ -10,6 +10,17 @@ from daylogs.fmt import hhmm, wall
 
 WEIGHT_TZ = ZoneInfo("America/Toronto")
 
+# The clock every weight-row test runs on, shared rather than repeated.
+#
+# Body's weight table is span-filtered by the tab's rolling 1m horizon, so a row seeded at
+# a fixed date silently leaves the window once the real clock moves a month past it — and
+# then `enter` selects nothing, no edit is armed, and the test passes while asserting
+# nothing. Two of these tests carried a comment predicting the row would leave the window
+# "on 2026-09-26". It did, and on 2026-09-28 the eight siblings that were never pinned all
+# failed at once. This is the sixth date bomb in this repo; it is a constant now so the
+# next person pins by using it rather than by rediscovering why.
+WEIGHT_DAY = dt.datetime(2026, 8, 27, 9, 0, tzinfo=WEIGHT_TZ)
+
 
 async def test_w_logs_a_weight(make_app, db, type_into):
     app = make_app()
@@ -432,7 +443,7 @@ async def test_x_with_an_empty_table_does_not_crash(make_app, db):
 
 async def test_x_deletes_a_weight_row_in_weight_mode(make_app, db):
     add_weight(db, kg=78.2, date="2026-08-27", at=1)
-    app = make_app()
+    app = make_app(now=lambda: WEIGHT_DAY)  # see WEIGHT_DAY
     async with app.run_test() as pilot:
         await go_body(pilot, app)
         await pilot.pause()
@@ -660,7 +671,7 @@ async def test_weight_deltas_are_coloured_by_direction(make_app, db):
 async def test_enter_on_a_weight_row_opens_it_prefilled(make_app, db):
     """Body had no key_activate at all, so enter did nothing here."""
     add_weight(db, kg=78.2, date="2026-08-27", at=1, note="post-run")
-    app = make_app()
+    app = make_app(now=lambda: WEIGHT_DAY)  # see WEIGHT_DAY
     async with app.run_test(size=(120, 30)) as pilot:
         await go_body(pilot, app)
         # shift+tab, not tab: the strip is weight / food / activity and food is the
@@ -677,7 +688,7 @@ async def test_enter_on_a_weight_row_opens_it_prefilled(make_app, db):
 async def test_editing_a_weight_updates_in_place(make_app, db, type_into):
     add_weight(db, kg=78.2, date="2026-08-27", at=1, note="post-run")
     original = list_weight(db)[0]["id"]
-    app = make_app()
+    app = make_app(now=lambda: WEIGHT_DAY)  # see WEIGHT_DAY
     async with app.run_test(size=(120, 30)) as pilot:
         await go_body(pilot, app)
         await pilot.press("shift+tab")
@@ -707,7 +718,7 @@ async def test_a_bare_number_moves_the_row_and_its_stamp_together(make_app, db, 
     path, and the test below pins that it preserves the stamp to the second.
     """
     add_weight(db, kg=78.2, date="2026-08-27", at=1787223943, note="")
-    app = make_app()
+    app = make_app(now=lambda: WEIGHT_DAY)  # see WEIGHT_DAY
     async with app.run_test(size=(120, 30)) as pilot:
         await go_body(pilot, app)
         await pilot.press("shift+tab")
@@ -759,7 +770,7 @@ async def test_undoing_an_edit_restores_rather_than_duplicates(make_app, db, typ
     """The undo replay used to be a plain INSERT, which is right for a delete and
     wrong for an edit."""
     add_weight(db, kg=78.2, date="2026-08-27", at=1, note="post-run")
-    app = make_app()
+    app = make_app(now=lambda: WEIGHT_DAY)  # see WEIGHT_DAY
     async with app.run_test(size=(120, 30)) as pilot:
         await go_body(pilot, app)
         await pilot.press("shift+tab")
@@ -780,7 +791,7 @@ async def test_undoing_an_edit_restores_rather_than_duplicates(make_app, db, typ
 
 async def test_a_bad_edit_keeps_the_text_and_changes_nothing(make_app, db, type_into):
     add_weight(db, kg=78.2, date="2026-08-27", at=1)
-    app = make_app()
+    app = make_app(now=lambda: WEIGHT_DAY)  # see WEIGHT_DAY
     async with app.run_test(size=(120, 30)) as pilot:
         await go_body(pilot, app)
         await pilot.press("shift+tab")
@@ -887,11 +898,7 @@ async def test_escaping_a_weight_edit_does_not_corrupt_next_entry(make_app, db, 
     """If user arms a weight edit, presses escape, then submits a fresh entry,
     that fresh entry must INSERT, not UPDATE the abandoned row."""
     add_weight(db, kg=78.2, date="2026-08-27", at=1, note="original")
-    # Pinned: the seed is dated, and the weight table is span-filtered, so on an
-    # unpinned clock the row leaves Body's rolling 1m window on 2026-09-26 —
-    # after which `enter` selects nothing and this test passes without arming an
-    # edit at all. Verified by probing the table at four dates.
-    app = make_app(now=lambda: dt.datetime(2026, 8, 27, 9, 0, tzinfo=WEIGHT_TZ))
+    app = make_app(now=lambda: WEIGHT_DAY)  # see WEIGHT_DAY
     async with app.run_test(size=(120, 30)) as pilot:
         await go_body(pilot, app)
         await pilot.press("shift+tab")
@@ -945,11 +952,7 @@ async def test_empty_submit_on_weight_edit_does_not_corrupt_next_entry(make_app,
     """If user arms a weight edit, clears the line, submits empty, then submits a
     fresh entry, that fresh entry must INSERT, not UPDATE the abandoned row."""
     add_weight(db, kg=78.2, date="2026-08-27", at=1, note="original")
-    # Pinned: the seed is dated, and the weight table is span-filtered, so on an
-    # unpinned clock the row leaves Body's rolling 1m window on 2026-09-26 —
-    # after which `enter` selects nothing and this test passes without arming an
-    # edit at all. Verified by probing the table at four dates.
-    app = make_app(now=lambda: dt.datetime(2026, 8, 27, 9, 0, tzinfo=WEIGHT_TZ))
+    app = make_app(now=lambda: WEIGHT_DAY)  # see WEIGHT_DAY
     async with app.run_test(size=(120, 30)) as pilot:
         await go_body(pilot, app)
         await pilot.press("shift+tab")
@@ -999,7 +1002,7 @@ async def test_a_parse_error_during_edit_keeps_editing_armed(make_app, db, type_
     """If an edit submission fails to parse, the retry must still update the same
     row, not insert a new one."""
     add_weight(db, kg=78.2, date="2026-08-27", at=1, note="original")
-    app = make_app()
+    app = make_app(now=lambda: WEIGHT_DAY)  # see WEIGHT_DAY
     async with app.run_test(size=(120, 30)) as pilot:
         await go_body(pilot, app)
         await pilot.press("shift+tab")
@@ -1020,7 +1023,7 @@ async def test_a_parse_error_during_edit_keeps_editing_armed(make_app, db, type_
 async def test_editing_a_weight_can_clear_its_note(make_app, db, type_into):
     """A line that omits the note words must clear the column."""
     add_weight(db, kg=78.2, date="2026-08-27", at=1, note="post-run")
-    app = make_app()
+    app = make_app(now=lambda: WEIGHT_DAY)  # see WEIGHT_DAY
     async with app.run_test(size=(120, 30)) as pilot:
         await go_body(pilot, app)
         await pilot.press("shift+tab")

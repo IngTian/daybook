@@ -1,5 +1,10 @@
 # daylogs
 
+[![PyPI](https://img.shields.io/pypi/v/daylogs)](https://pypi.org/project/daylogs/)
+[![Python](https://img.shields.io/pypi/pyversions/daylogs)](https://pypi.org/project/daylogs/)
+[![tests](https://img.shields.io/github/actions/workflow/status/IngTian/daylogs/ci.yml?branch=main&label=tests)](https://github.com/IngTian/daylogs/actions/workflows/ci.yml)
+[![License](https://img.shields.io/pypi/l/daylogs)](LICENSE)
+
 I only get real control of my weight and my spending when I type the numbers in
 myself — not when something syncs them for me, but when I deliberately type them.
 The typing is what makes me notice, and noticing is what changes the next
