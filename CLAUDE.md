@@ -294,6 +294,26 @@ appended prose where it was convenient rather than editing the map.
   showing a twelfth of one would be lying about the row. The pane marks it `#N` so the two
   readings do not look like a contradiction, and `render_expense` round-trips the token so a
   displayed marker stays editable.
+  **But the pane also pins the shares it is being counted at, above the payments.** Marking
+  the charge `#12` only helps in the month the charge is *in*; in the other eleven the share
+  arrives with no row at all, so October's header read 72.81 over a list that summed to
+  nothing, and September's read 72.81 over rows saying 270.00 and 603.68. Both are the same
+  missing sentence — which payments are being counted here, and for how much — and "the
+  marker stops that reading as a contradiction" was only ever true one month in twelve.
+  `money.prepaid_inflows(conn, span)` is the one place that answers it: one entry per
+  **charge**, not per covered month, since twelve lines for one subscription would bury the
+  payments the pane exists for. Its `share` is **unrounded** for the same reason
+  `_prepaid_shares` is — round per line and add, and the rows are a cent short of a header
+  that rounds once at the end, which is the original defect wearing a smaller hat. It
+  filters through `_months_filter`, so a second month rule cannot put the list and the total
+  back into disagreement by a different route.
+  The rows are `⇢` **and** faint, never faint alone, because these are the one place on the
+  pane where the amount is not what left the account. They are **inert** — `_ids` takes `-1`
+  like a group header, so `enter`, `x` and the fold all skip them; a share is arithmetic over
+  a charge in another month, and arming an edit from one would write to the wrong month. The
+  charge's own date is on the line because that is where `g` has to take you. Pinned above
+  rather than sorted or grouped in: a share has no date of its own to sort by, and inside a
+  category group it would fold into a total that answers a cash question.
   A covered month counts if the span touches it at all — deliberately the same rule
   `_budget_by_category` already uses, since budgets are stored per calendar month and summed
   over `span.months()` however much of each month the span covers. That is what makes a

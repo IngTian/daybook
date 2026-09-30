@@ -26,6 +26,7 @@ from daylogs.money import (
     _covered_months,
     add_expense,
     list_budget,
+    prepaid_inflows,
     roll_month_budgets,
     summarize_month,
     summarize_span,
@@ -258,3 +259,238 @@ async def test_the_expenses_pane_shows_the_real_charge_with_its_marker(make_app,
     assert any("240.00" in c for c in cells), f"the pane must show what was paid: {cells}"
     row = db.execute("SELECT amount, prepaid_months FROM expense").fetchone()
     assert (row["amount"], row["prepaid_months"]) == (240.0, 12)
+
+
+# ── the shares, listed ───────────────────────────────────────────────────
+# A charge dated in June contributes to September's total with no row in September to
+# account for it: the header read 20.00 over a list that summed to nothing. In the charge's
+# own month it was worse in the other direction — 20.00 counted over a row saying 240.00.
+# Both are one missing statement: which payments are being counted here, and for how much.
+def test_a_month_inside_the_coverage_lists_the_share_and_its_position(db):
+    add_expense(db, amount=240.0, description="Insurance", category="subscriptions",
+                date="2026-09-14", prepaid_months=12)
+    got = prepaid_inflows(db, resolve("MTD", anchor="2026-12-31"))
+    assert len(got) == 1, got
+    d = got[0]
+    assert (round(d["share"], 2), d["first"], d["last"], d["months"]) == (20.0, 4, 4, 12)
+    assert (d["date"], d["amount"]) == ("2026-09-14", 240.0), "the charge, not the share"
+
+
+def test_the_charges_own_month_lists_it_too(db):
+    """The month with the row is the month whose numbers disagree most — the pane says
+    240.00 and the header counts 20.00. Leaving it out would explain every month but the
+    one where the gap is widest."""
+    add_expense(db, amount=240.0, description="Insurance", category="subscriptions",
+                date="2026-09-14", prepaid_months=12)
+    got = prepaid_inflows(db, resolve("MTD", anchor="2026-09-30"))
+    assert [(round(d["share"], 2), d["first"]) for d in got] == [(20.0, 1)]
+
+
+def test_a_month_outside_the_coverage_lists_nothing(db):
+    add_expense(db, amount=240.0, description="Insurance", category="subscriptions",
+                date="2026-09-14", prepaid_months=12)
+    assert prepaid_inflows(db, resolve("MTD", anchor="2026-08-31")) == []
+    assert prepaid_inflows(db, resolve("MTD", anchor="2027-09-30")) == []
+
+
+def test_a_wide_span_is_one_line_per_payment_not_one_per_month(db):
+    """Twelve lines for one subscription would bury the payments the pane is actually for.
+    The share is summed over the covered months the span touches, and the position becomes
+    a range so the line still says how much of the coverage it is describing."""
+    add_expense(db, amount=240.0, description="Insurance", category="subscriptions",
+                date="2026-09-14", prepaid_months=12)
+    got = prepaid_inflows(db, resolve("3m", anchor="2026-11-30"))
+    assert len(got) == 1, got
+    assert (round(got[0]["share"], 2), got[0]["first"], got[0]["last"]) == (60.0, 1, 3)
+
+
+def test_the_listed_shares_account_for_the_header_total(db):
+    """The whole point of listing them. A total the pane cannot explain from its own rows is
+    the defect; this is the assertion that says it is gone.
+
+    Unrounded on purpose, for the reason `_prepaid_shares` is: rounding each line and then
+    adding drifts a cent from a header that rounds once at the end.
+    """
+    add_expense(db, amount=240.01, description="Insurance", category="subscriptions",
+                date="2026-09-14", prepaid_months=12)
+    add_expense(db, amount=9.99, description="Streaming", category="subscriptions",
+                date="2026-12-02")
+    span = resolve("MTD", anchor="2026-12-31")
+    plain = db.execute(
+        "SELECT COALESCE(SUM(amount), 0) FROM expense WHERE prepaid_months IS NULL"
+        " AND date BETWEEN ? AND ?",
+        (span.start, span.end),
+    ).fetchone()[0]
+    shares = sum(d["share"] for d in prepaid_inflows(db, span))
+    s = summarize_span(db, span=span, today="2026-12-31")
+    assert round(plain + shares, 2) == s.total_spent
+
+
+def test_an_ordinary_expense_is_never_listed_as_a_share(db):
+    add_expense(db, amount=52.10, description="market", category="grocery", date="2026-09-03")
+    assert prepaid_inflows(db, resolve("MTD", anchor="2026-09-30")) == []
+
+
+def test_all_time_lists_every_payment_once_at_its_full_amount(db):
+    """An unbounded span touches every covered month, so the share is the whole charge —
+    which is what `_months_filter` returning None already means for the totals."""
+    add_expense(db, amount=240.0, description="Insurance", category="subscriptions",
+                date="2026-09-14", prepaid_months=12)
+    got = prepaid_inflows(db, resolve("all", anchor="2027-12-31"))
+    assert [(round(d["share"], 2), d["first"], d["last"]) for d in got] == [(240.0, 1, 12)]
+
+
+def test_a_prepaid_refund_survives_being_listed(db):
+    """A negative amount is a refund and is first-class, so the list has to carry one
+    rather than filter it out the way the panels once filtered `spent > 0`."""
+    add_expense(db, amount=-120.0, description="Insurance refunded", category="subscriptions",
+                date="2026-09-14", prepaid_months=12)
+    got = prepaid_inflows(db, resolve("MTD", anchor="2026-09-30"))
+    assert [round(d["share"], 2) for d in got] == [-10.0]
+
+
+async def test_a_covered_month_shows_the_share_where_no_payment_row_exists(make_app, db, type_into):
+    """October has no expense row at all — the charge is dated in September — and its header
+    still counted 20.00. That is the disagreement: a total the pane could not explain from
+    anything on it."""
+    app = make_app(now=lambda: NOW)
+    async with app.run_test(size=(120, 34)) as pilot:
+        tab = await go_money(pilot, app)
+        await pilot.press("e")
+        await type_into(pilot, "240 Insurance !subscriptions #12")
+        await pilot.press("enter")
+        await pilot.pause()
+        while tab.view.pane != "expenses":
+            await pilot.press("tab")
+            await pilot.pause()
+        tab.view.anchor = "2026-10-31"
+        tab.reload()
+        await pilot.pause()
+        table = app.query_one("#money-table")
+        cells = [str(c) for k in table.rows for c in table.get_row(k)]
+    assert any("⇢" in c for c in cells), f"the share has to be marked, not just dim: {cells}"
+    assert any("Insurance #2/12" in c for c in cells), f"month 2 of 12: {cells}"
+    assert any("20.00" in c for c in cells), f"the share, not the charge: {cells}"
+    assert not any("240.00" in c for c in cells), (
+        f"October is not when the money left the account: {cells}"
+    )
+
+
+async def test_the_share_row_cannot_be_edited_or_deleted(make_app, db, type_into):
+    """A share is not a row — it is arithmetic over a charge in another month. `enter` and
+    `x` treat it exactly as they treat a group header, which is the existing precedent for
+    a line with no id. Getting this wrong would arm an edit against the wrong month."""
+    app = make_app(now=lambda: NOW)
+    async with app.run_test(size=(120, 34)) as pilot:
+        tab = await go_money(pilot, app)
+        await pilot.press("e")
+        await type_into(pilot, "240 Insurance !subscriptions #12")
+        await pilot.press("enter")
+        await pilot.pause()
+        while tab.view.pane != "expenses":
+            await pilot.press("tab")
+            await pilot.pause()
+        tab.view.anchor = "2026-10-31"
+        tab.reload()
+        await pilot.pause()
+        table = app.query_one("#money-table")
+        table.move_cursor(row=0)
+        await pilot.pause()
+        assert tab._selected_id() is None, "the pinned share must carry no row id"
+        await pilot.press("enter")
+        await pilot.pause()
+        assert tab._editing is None, "no edit may be armed from a share"
+        await pilot.press("x")
+        await pilot.pause()
+    assert db.execute("SELECT COUNT(*) FROM expense").fetchone()[0] == 1, "still there"
+
+
+async def test_the_shares_are_pinned_above_the_payments(make_app, db, type_into):
+    """`at the top` is the whole layout decision: they are outside the sort the payments
+    below keep, because a share has no date of its own to sort by."""
+    app = make_app(now=lambda: NOW)
+    async with app.run_test(size=(120, 34)) as pilot:
+        tab = await go_money(pilot, app)
+        await pilot.press("e")
+        await type_into(pilot, "240 Insurance !subscriptions #12")
+        await pilot.press("enter")
+        await pilot.pause()
+        await pilot.press("e")
+        await type_into(pilot, "52.10 market !grocery")
+        await pilot.press("enter")
+        await pilot.pause()
+        while tab.view.pane != "expenses":
+            await pilot.press("tab")
+            await pilot.pause()
+        table = app.query_one("#money-table")
+        first = [str(c) for c in table.get_row(list(table.rows)[0])]
+        every = [str(c) for k in table.rows for c in table.get_row(k)]
+    assert any("⇢" in c for c in first), f"the share belongs on row 0: {first}"
+    assert any("52.10" in c for c in every) and any("240.00" in c for c in every), (
+        f"and the payments are all still there, at what was paid: {every}"
+    )
+
+
+def test_the_coverage_label_says_which_months_it_is_describing():
+    """One month reads `#4/12`; a span catching three of them reads `#4-6/12`. The range
+    branch exists because a wide span sums several months into one line, and a line saying
+    `#4/12` beside three months' worth of money would misstate what it is."""
+    from daylogs.tui.money_tab import _coverage
+
+    assert _coverage({"first": 4, "last": 4, "months": 12}) == "#4/12"
+    assert _coverage({"first": 4, "last": 6, "months": 12}) == "#4-6/12"
+    assert _coverage({"first": 1, "last": 12, "months": 12}) == "#1-12/12"
+
+
+def test_several_shares_in_one_month_still_add_back_to_the_header(db):
+    """One line rounds harmlessly; the drift only appears once several do. Three 100.00
+    charges over three months are 33.3333 each — rounded per line they sum to 99.99, and
+    the header, which rounds once at the end, says 100.00. A pane whose rows are a cent
+    short of its own total is the defect wearing a smaller hat."""
+    for i in range(3):
+        add_expense(db, amount=100.0, description=f"Thirds {i}", category="subscriptions",
+                    date="2026-09-14", prepaid_months=3)
+    span = resolve("MTD", anchor="2026-09-30")
+    shares = sum(d["share"] for d in prepaid_inflows(db, span))
+    s = summarize_span(db, span=span, today="2026-09-30")
+    assert round(shares, 2) == s.total_spent == 100.0
+    assert sum(round(d["share"], 2) for d in prepaid_inflows(db, span)) == 99.99, (
+        "the cent that rounding per line would have lost"
+    )
+
+
+def test_the_biggest_share_leads_and_a_refund_sits_at_the_bottom(db):
+    """A short pinned block answers "what is inflating this month", so it is ordered by
+    size. Signed rather than by magnitude, so a refund reads as a subtraction at the end
+    instead of leading the list it reduces."""
+    add_expense(db, amount=120.0, description="Small", category="subscriptions",
+                date="2026-09-14", prepaid_months=12)
+    add_expense(db, amount=600.0, description="Large", category="subscriptions",
+                date="2026-09-14", prepaid_months=12)
+    add_expense(db, amount=-240.0, description="Refunded", category="subscriptions",
+                date="2026-09-14", prepaid_months=12)
+    got = prepaid_inflows(db, resolve("MTD", anchor="2026-09-30"))
+    assert [d["description"] for d in got] == ["Large", "Small", "Refunded"], got
+
+
+async def test_the_grouped_pane_marks_the_share_too(make_app, db, type_into):
+    """`G` puts the marker column to work, so the share takes `⇢` where a group header
+    takes `▾`. Two renderers means two chances to leave colour as the only signal."""
+    app = make_app(now=lambda: NOW)
+    async with app.run_test(size=(120, 34)) as pilot:
+        tab = await go_money(pilot, app)
+        await pilot.press("e")
+        await type_into(pilot, "240 Insurance !subscriptions #12")
+        await pilot.press("enter")
+        await pilot.pause()
+        while tab.view.pane != "expenses":
+            await pilot.press("tab")
+            await pilot.pause()
+        tab.view.grouped = True
+        tab.view.anchor = "2026-10-31"
+        tab.reload()
+        await pilot.pause()
+        table = app.query_one("#money-table")
+        first = [str(c) for c in table.get_row(list(table.rows)[0])]
+    assert "⇢" in first[0], f"the marker column carries it when grouped: {first}"
+    assert any("Insurance #2/12" in c for c in first), first

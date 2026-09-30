@@ -617,6 +617,61 @@ def _months_filter(span: Span | None) -> set[str] | None:
     return set(months) if months else None
 
 
+def prepaid_inflows(conn, span: Span | None) -> list[dict]:
+    """Every prepaid charge contributing to `span`'s totals, and what it contributes.
+
+    The pane lists payments by date, so a charge dated in June contributes to September's
+    total with no row in September to account for it: the header read 20.00 over a list
+    that summed to nothing. In the charge's own month it disagreed the other way — 20.00
+    counted, over a row saying 240.00. Both are one missing statement, which is all this
+    is: which payments are being counted here, and for how much.
+
+    One entry per **charge**, not per covered month, with `share` summed over the months of
+    its coverage that the span actually touches. Twelve lines for one subscription would
+    bury the payments the pane exists for. `first`/`last` are 1-based positions inside the
+    charge's own N months, so a caller can say "month 4 of 12" — or "4 to 6" on a span wide
+    enough to catch several — without re-deriving the coverage.
+
+    `share` is **unrounded**, for the reason `_prepaid_shares` is: rounding per line and
+    then adding drifts a cent away from a header that rounds once at the end, and a list
+    that cannot account for the total is the defect this exists to fix. Callers format it.
+
+    Filtered through `_months_filter`, the same rule `_spent_by_category` uses, because
+    agreeing with the total is the entire point — a second month rule here would put the
+    list and the header back into disagreement by a different route.
+    """
+    keep = _months_filter(span)
+    out: list[dict] = []
+    rows = conn.execute(
+        "SELECT id, date, amount, category, description, prepaid_months FROM expense"
+        " WHERE prepaid_months IS NOT NULL"
+    )
+    for r in rows:
+        n = int(r["prepaid_months"])
+        covered = _covered_months(r["date"], n)
+        hit = [i for i, ym in enumerate(covered) if keep is None or ym in keep]
+        if not hit:
+            continue
+        out.append(
+            {
+                "id": int(r["id"]),
+                "date": r["date"],
+                "category": r["category"],
+                "description": r["description"],
+                "amount": float(r["amount"]),
+                "months": n,
+                "share": float(r["amount"]) / n * len(hit),
+                "first": hit[0] + 1,
+                "last": hit[-1] + 1,
+            }
+        )
+    # Biggest contributor first: this is a short pinned block answering "what is inflating
+    # this month", not the payment log below it, which keeps its own sort. Signed rather
+    # than by magnitude, so a refund sits at the bottom where it reads as a subtraction.
+    out.sort(key=lambda d: (-d["share"], d["date"], d["id"]))
+    return out
+
+
 def _spent_by_category(conn, span: Span | None) -> dict[str, float]:
     where, args = _span_where(span)
     # Prepaid rows are excluded here and added back by the month they cover, not the day

@@ -64,6 +64,14 @@ def _described(row) -> str:
     return f"{row['description']} #{months}" if months else row["description"]
 
 
+def _coverage(d) -> str:
+    """Which of a prepayment's months this share is: `#4/12`, or `#4-6/12` when the span is
+    wide enough to catch several of them. Mirrors the `#12` on the charge's own row, so the
+    two lines read as the same payment seen from two places."""
+    first, last, n = d["first"], d["last"], d["months"]
+    return f"#{first}/{n}" if first == last else f"#{first}-{last}/{n}"
+
+
 def _budget_style(spent: float, budget: float) -> str:
     """Over the cap is bad, near it is a warning, a refund is neither."""
     if budget <= 0 or spent < 0:
@@ -278,8 +286,10 @@ class MoneyTab(PanelTab):
 
     def _fill_expenses(self, table) -> None:
         rows = money.query_expenses(self.app.conn, self.view)
+        inflows = money.prepaid_inflows(self.app.conn, self.view.span())
         if not self.view.grouped:
             table.add_columns("date", "description", "category", "amount")
+            self._add_inflows(table, inflows, grouped=False)
             for r in rows:
                 table.add_row(
                     r["date"], Text(_described(r)), Text(r["category"]), fmt(r["amount"])
@@ -289,6 +299,7 @@ class MoneyTab(PanelTab):
             return
 
         table.add_columns("", "date / category", "description", "amount")
+        self._add_inflows(table, inflows, grouped=True)
         for slug, total, count, children in money.group_expenses(
             rows, collapsed=self.view.collapsed
         ):
@@ -302,6 +313,34 @@ class MoneyTab(PanelTab):
                 )
                 self._ids.append(r["id"])
                 self._groups.append("")
+
+    def _add_inflows(self, table, inflows, *, grouped: bool) -> None:
+        """Prorated shares, pinned above the payments and marked as not being payments.
+
+        These are the one place on this pane where the amount is not what left the account,
+        so `⇢` carries that and `FAINT` only emphasises it — colour is never the only
+        signal. The position (`#4/12`) is what ties a line back to the `#12` on the charge
+        itself, which may be months away in either direction.
+
+        Pinned above rather than sorted or grouped in: a share has no date of its own to
+        sort by, and putting it inside a category group would fold it into a total that
+        answers a cash question. The payments below keep their own sort untouched.
+
+        Inert — `_ids` takes -1 and `_groups` takes "", so `enter`, `x` and the group fold
+        all skip these exactly as they skip a group header. The charge's own date is on the
+        line because that is where `g` has to take you to edit it.
+        """
+        for d in inflows:
+            date = Text(d["date"], style=FAINT)
+            label = Text(f"{d['description']} {_coverage(d)}", style=FAINT)
+            share = Text(fmt(d["share"]), style=FAINT)
+            if grouped:
+                table.add_row(Text("⇢", style=FAINT), date, label, share)
+            else:
+                table.add_row(date, Text("⇢ ", style=FAINT) + label,
+                              Text(d["category"], style=FAINT), share)
+            self._ids.append(-1)
+            self._groups.append("")
 
     def _fill_recurring(self, table) -> None:
         table.add_columns("name", "category", "cost", "cycle", "monthly", "on")
