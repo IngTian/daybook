@@ -1,5 +1,6 @@
 import datetime as dt
 
+import pytest
 from helpers import all_expenses, assert_armed, go_money
 
 from daylogs.money import (
@@ -918,7 +919,12 @@ async def test_editing_an_expense_can_clear_its_note(make_app, db, type_into):
         await pilot.pause()
     rows = all_expenses(db)
     assert len(rows) == 1
-    assert rows[0]["note"] == "", "omitting ~note must clear the note"
+    # `is None`, not `== ""`. This asserted the empty string and so froze a second
+    # representation of "no note" as expected behaviour — the same shape CLAUDE.md records
+    # for `test_fixing_the_category_does_not_loop_forever`. The name was always right; a
+    # cleared note is indistinguishable from one never set, which is what `add_expense` has
+    # always produced and what `update_expense` now produces too.
+    assert rows[0]["note"] is None, "omitting ~note must clear the note"
 
 
 async def test_editing_an_expense_with_unchanged_prefill_preserves_note(make_app, db, type_into):
@@ -1010,3 +1016,78 @@ async def test_a_backdated_expense_lands_inside_the_visible_range(make_app, db, 
         await pilot.press("t")
         await pilot.pause()
         assert tab.view.anchor == "2026-09-05", "`t` must still come home to today"
+
+
+# ── the note on screen ───────────────────────────────────────────────────
+async def _expense_cells(pilot, app, *, grouped):
+    tab = app.query_one("#money")
+    while tab.view.pane != "expenses":
+        await pilot.press("tab")
+        await pilot.pause()
+    tab.view.grouped = grouped
+    tab.reload()
+    await pilot.pause()
+    t = app.query_one("#money-table")
+    return [c for k in t.rows for c in t.get_row(k)]
+
+
+@pytest.mark.parametrize("grouped", [False, True])
+async def test_the_note_is_shown_beside_the_description(make_app, db, grouped):
+    """48 of 234 real expenses carry a note naming which card paid, and the app displayed it
+    nowhere — settable, exported, round-tripped through the edit prefill, invisible."""
+    add_expense(db, amount=47.20, description="Costco Gas", category="transport",
+                date="2026-09-14", note="CIBC MC")
+    app = make_app()
+    async with app.run_test(size=(120, 36)) as pilot:
+        await go_money(pilot, app)
+        cells = await _expense_cells(pilot, app, grouped=grouped)
+    joined = " | ".join(str(c) for c in cells)
+    assert "Costco Gas" in joined and "CIBC MC" in joined, joined
+
+
+@pytest.mark.parametrize("grouped", [False, True])
+async def test_the_note_is_dim_and_gapped_not_run_together(make_app, db, grouped):
+    """Dim carries that it is secondary, and the gap carries it where dim does not render —
+    colour is emphasis, never the only signal. Without the gap a monochrome terminal reads
+    `Costco Gas CIBC MC` as one description."""
+    add_expense(db, amount=47.20, description="Costco Gas", category="transport",
+                date="2026-09-14", note="CIBC MC")
+    app = make_app()
+    async with app.run_test(size=(120, 36)) as pilot:
+        await go_money(pilot, app)
+        cells = await _expense_cells(pilot, app, grouped=grouped)
+    cell = next(c for c in cells if hasattr(c, "spans") and "CIBC MC" in c.plain)
+    i = cell.plain.index("CIBC MC")
+    assert cell.plain[i - 2 : i] == "  ", f"no gap before the note: {cell.plain!r}"
+    styled = [s for s in cell.spans if s.start <= i < s.end]
+    assert styled and any("dim" in str(s.style) for s in styled), f"not dimmed: {cell.spans}"
+    assert not cell.plain.startswith(" "), "the description itself must not shift"
+
+
+@pytest.mark.parametrize("grouped", [False, True])
+async def test_the_prepaid_marker_shows_in_both_pane_modes(make_app, db, grouped):
+    """Grouped mode rendered a bare `description` and so dropped `#N` entirely — the marker
+    the prorate invariant relies on to stop a 240.00 row reading as a contradiction of a
+    header counting 20.00. One builder now serves both modes so they cannot drift again."""
+    add_expense(db, amount=240.0, description="Insurance", category="subscriptions",
+                date="2026-09-14", prepaid_months=12)
+    app = make_app()
+    async with app.run_test(size=(120, 36)) as pilot:
+        await go_money(pilot, app)
+        cells = await _expense_cells(pilot, app, grouped=grouped)
+    joined = " | ".join(str(c) for c in cells)
+    assert "#12" in joined, f"the prepaid marker is missing when grouped={grouped}: {joined}"
+
+
+@pytest.mark.parametrize("grouped", [False, True])
+async def test_a_row_with_no_note_gains_nothing(make_app, db, grouped):
+    """Including the real database's one row whose note is an empty string rather than NULL:
+    it must render as absent, not as a trailing gap."""
+    add_expense(db, amount=80.61, description="Gas", category="transport", date="2026-09-14")
+    db.execute("UPDATE expense SET note = '' WHERE description = 'Gas'")
+    app = make_app()
+    async with app.run_test(size=(120, 36)) as pilot:
+        await go_money(pilot, app)
+        cells = await _expense_cells(pilot, app, grouped=grouped)
+    cell = next(c for c in cells if hasattr(c, "plain") and "Gas" in c.plain)
+    assert cell.plain == "Gas", f"trailing whitespace or marker crept in: {cell.plain!r}"
