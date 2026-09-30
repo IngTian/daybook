@@ -135,7 +135,13 @@ def connect(path: Path | str) -> sqlite3.Connection:
     conn = sqlite3.connect(p, isolation_level=None)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA journal_mode=DELETE")
-    conn.execute("PRAGMA foreign_keys=ON")
+    # No `PRAGMA foreign_keys=ON`: the schema declares no foreign keys at all
+    # (`PRAGMA foreign_key_list` returns nothing for all seven tables), and
+    # `categories.py` names "a table, three foreign keys and a service" as the design this
+    # app deliberately rejected. The pragma's only other effects govern `ALTER TABLE RENAME`
+    # and `DROP TABLE`, neither of which this codebase issues — `_ADD_COLUMNS` only ever
+    # ADDs. It read as a safety measure while enforcing nothing; its test asserted the
+    # pragma was set rather than that anything was enforced.
     return conn
 
 
@@ -154,7 +160,14 @@ def ensure_schema(conn: sqlite3.Connection) -> None:
         have = {r[1] for r in conn.execute(f"PRAGMA table_info({table})")}
         if column not in have:
             conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {decl}")
-    conn.execute(f"PRAGMA user_version={SCHEMA_VERSION}")
+    # Monotonic, never a bare assignment. iCloud syncs one database between installs, and
+    # the daily `day` is a separate `uv tool install` that can lag this checkout — so an
+    # older daylogs opening a newer file would otherwise stamp the version *down*, and the
+    # stamp's whole job is to say which shapes a reader can expect. Writing only forward
+    # means an old install leaves the newer number alone rather than lying about it.
+    current = conn.execute("PRAGMA user_version").fetchone()[0]
+    if SCHEMA_VERSION > current:
+        conn.execute(f"PRAGMA user_version={SCHEMA_VERSION}")
 
 
 def table_names(conn: sqlite3.Connection) -> list[str]:

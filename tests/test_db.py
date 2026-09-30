@@ -29,8 +29,20 @@ def test_journal_mode_is_delete_not_wal(db):
     assert mode.lower() == "delete"
 
 
-def test_foreign_keys_enforced(db):
-    assert db.execute("PRAGMA foreign_keys").fetchone()[0] == 1
+def test_the_schema_declares_no_foreign_keys(db):
+    """Replaces `test_foreign_keys_enforced`, which asserted `PRAGMA foreign_keys == 1` — a
+    circular check whose *name* claimed an enforcement the schema never had. This asks the
+    question the old name promised to answer, and it is the assertion that would fail if a
+    future table grew a REFERENCES clause without the pragma coming back with it."""
+    tables = [
+        r[0]
+        for r in db.execute(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'"
+        )
+    ]
+    assert len(tables) == 7, tables
+    for t in tables:
+        assert list(db.execute(f"PRAGMA foreign_key_list({t})")) == [], t
 
 
 def test_user_version_stamped(db):
@@ -105,3 +117,21 @@ def test_table_names_hides_sqlite_internals(tmp_path):
     assert "sqlite_sequence" in raw, "this database was supposed to have one to hide"
     assert table_names(conn) == ["thing"]
     conn.close()
+
+
+def test_the_version_stamp_only_ever_moves_forward(tmp_path):
+    """An older install must not stamp a newer database down.
+
+    iCloud syncs one file between machines and the daily `day` is a separate
+    `uv tool install` that can lag the checkout, so `ensure_schema` runs on databases newer
+    than the code running it. A bare `PRAGMA user_version=N` made that a silent downgrade —
+    and a stamp that can move backwards cannot answer the one question it exists for.
+    """
+    conn = connect(tmp_path / "t.db")
+    ensure_schema(conn)
+    conn.execute("PRAGMA user_version=99")          # as a future release would leave it
+    ensure_schema(conn)                              # today's code opens it again
+    assert conn.execute("PRAGMA user_version").fetchone()[0] == 99, "stamped a newer DB down"
+    conn.execute(f"PRAGMA user_version={SCHEMA_VERSION - 1}")
+    ensure_schema(conn)
+    assert conn.execute("PRAGMA user_version").fetchone()[0] == SCHEMA_VERSION, "and forward"

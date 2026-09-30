@@ -305,7 +305,7 @@ async def generate(conn, cfg, *, date: str, runner, retries: int = 1, on_attempt
             content = out.strip()
             upsert_report(conn, date=date, content=content)
             return content
-        except Exception as e:  # noqa: BLE001 - retried, then re-raised unchanged
+        except Exception as e:  # retried, then re-raised unchanged
             last = e
             log.warning("summary attempt %d for %s failed: %s", attempt + 1, date, e)
     raise last

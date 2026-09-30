@@ -328,9 +328,22 @@ def upsert_budget(
     category: str,
     amount: float,
     source: str = "manual",
-    note: str | None = None,
     cfg=None,
 ) -> int:
+    """No `note`: there was a parameter for it and nothing could ever reach it.
+
+    `parse_budget` calls `_reject_unsupported(g, frozenset(["!"]))`, so typing `~lease` on a
+    budget line *raises*; `render_budget` emits only `amount name !category`; the categories
+    pane's columns are category/budget/spent/Δ/6-mo. None of the four production call sites
+    passed it and neither did any test, and being keyword-only it could not be supplied
+    positionally by accident — there was no path from intent to a stored value.
+
+    The DDL column stays. Dropping it needs a table rewrite, which `_ADD_COLUMNS` correctly
+    refuses to grow into, and a permanently-NULL column costs nothing. `export_csv` does
+    `SELECT *`, so `budget.csv` keeps the same (always-empty) field and is byte-identical.
+    Contrast `budget.source`, which looks equally decorative and is read by
+    `_rename_rolled_budgets`' `WHERE … AND source = 'recurring'`.
+    """
     name = name.strip()
     if not name:
         raise MoneyError("budget line needs a name")
@@ -342,15 +355,14 @@ def upsert_budget(
     check_category(category, cfg)
     conn.execute(
         """
-        INSERT INTO budget (month, name, category, amount, source, note)
-        VALUES (?, ?, ?, ?, ?, ?)
+        INSERT INTO budget (month, name, category, amount, source)
+        VALUES (?, ?, ?, ?, ?)
         ON CONFLICT(month, name) DO UPDATE SET
           category = excluded.category,
           amount = excluded.amount,
-          source = excluded.source,
-          note = excluded.note
+          source = excluded.source
         """,
-        (month, name, category, float(amount), source, note or None),
+        (month, name, category, float(amount), source),
     )
     row = conn.execute(
         "SELECT id FROM budget WHERE month = ? AND name = ?", (month, name)
@@ -425,7 +437,6 @@ class MonthSummary:
     total_budget: float
     remaining: float
     by_category: list[CategorySpend]
-    top_expenses: list[sqlite3.Row]
     day_of_month: int
     days_in_month: int
     over_budget: list[CategorySpend]
@@ -449,17 +460,16 @@ def summarize_month(conn, *, month: str, today: str | None = None) -> MonthSumma
 def summarize_span(
     conn, *, span: Span | None, today: str | None = None
 ) -> MonthSummary:
-    """Per-category budget vs spent over an arbitrary date span, plus totals, the
-    top five spends, and a six-month per-category history.
+    """Per-category budget vs spent over an arbitrary date span, plus totals and a
+    six-month per-category history.
 
     `span=None` means all time. Spend is filtered by **date**, so a one-week
     horizon really covers seven days rather than the whole month. **Budget over a
     span is the sum of the calendar months it touches** — a span containing an
     unbudgeted month is honestly under-budgeted, not an error.
 
-    Query count is constant regardless of span width: one for the history window,
-    one for span spend, one for budgets, one for the top five. The obvious
-    implementation issues one query per month in the span.
+    Query count is constant regardless of span width rather than one query per month
+    in the span, which is what the obvious implementation does.
     """
     months = span.months() if span is not None else []
     anchor = months[-1] if months else _latest_expense_month(conn)
@@ -515,15 +525,6 @@ def summarize_span(
     total_budget = round(sum(c.budget for c in by_category), 2)
     total_spent = round(sum(c.spent for c in by_category), 2)
 
-    where, args = _span_where(span)
-    top_expenses = list(
-        conn.execute(
-            f"SELECT * FROM expense WHERE amount > 0{where}"
-            " ORDER BY amount DESC, id DESC LIMIT 5",
-            args,
-        )
-    )
-
     # Burn-against-elapsed only means something for a single month; across a
     # quarter it would invite a false read, so the caller is told to hide it.
     day, total_days = _calendar_progress(months[0], today) if len(months) == 1 else (0, 0)
@@ -534,7 +535,6 @@ def summarize_span(
         total_budget=total_budget,
         remaining=round(total_budget - total_spent, 2),
         by_category=by_category,
-        top_expenses=top_expenses,
         day_of_month=day,
         days_in_month=total_days,
         over_budget=[c for c in by_category if c.budget > 0 and c.delta < 0],

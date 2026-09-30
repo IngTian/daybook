@@ -36,7 +36,6 @@ Issues = "https://github.com/IngTian/daylogs/issues"
 dev = [
     "pytest>=8",
     "pytest-asyncio>=0.24",
-    "pytest-textual-snapshot>=1",
     "ruff>=0.6",
 ]
 

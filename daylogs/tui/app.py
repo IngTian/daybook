@@ -385,7 +385,7 @@ class DaylogsApp(App):
                 f" ON CONFLICT(id) DO UPDATE SET {sets}",
                 tuple(row.values()),
             )
-        except Exception as e:  # noqa: BLE001 - a failed undo must not kill the app
+        except Exception as e:  # a failed undo must not kill the app
             # ...and must not consume the entry either. `ON CONFLICT(id)` resolves the one
             # conflict the stack itself causes — the row being present rather than gone. It
             # does not resolve a conflict on another unique index, and `recurring.name` is

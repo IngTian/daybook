@@ -285,7 +285,7 @@ class SummaryTab(PanelTab):
                 # figure larger than the budget it is displayed against.
                 on_attempt=lambda: self._set_busy(True),
             )
-        except Exception as e:  # noqa: BLE001 - surfaced to the user, not swallowed
+        except Exception as e:  # surfaced to the user, not swallowed
             self._set_busy(False)
             self.reload()
             self.app.notify_error(f"summary failed: {e}")

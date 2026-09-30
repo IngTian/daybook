@@ -566,11 +566,6 @@ A failed estimate leaves the file pending rather than silently consuming it.
 SQLite, seven tables, at `~/Documents/daylogs/daylogs.db`. Logs at
 `~/.daylogs/logs/`. Override the data root with `DAYLOGS_HOME`.
 
-This project was called **daybook** until 0.2.0, and the data root moved with the
-rename. If a `~/Documents/daybook/` is still there, `day` refuses to start and
-prints the two `mv` commands that move it — rather than quietly opening a new,
-empty database beside your old one.
-
 The connection runs `PRAGMA journal_mode=DELETE` on purpose. WAL's `-wal` and
 `-shm` sidecars can sync independently of the main file under iCloud Drive and
 corrupt the database on the receiving device; rollback-journal keeps SQLite to

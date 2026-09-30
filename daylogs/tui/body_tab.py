@@ -723,7 +723,7 @@ class BodyTab(PanelTab):
                 timeout_sec=self.app.cfg.estimate_timeout_sec,
                 model=self.app.cfg.claude_model,
             )
-        except Exception as e:  # noqa: BLE001 - surfaced to the user, not swallowed
+        except Exception as e:  # surfaced to the user, not swallowed
             self._pending_photo = None
             self._set_estimating(False)
             self.app.notify_error(f"photo estimate failed: {e}")
@@ -746,7 +746,7 @@ class BodyTab(PanelTab):
                 timeout_sec=self.app.cfg.estimate_timeout_sec,
                 model=self.app.cfg.claude_model,
             )
-        except Exception as e:  # noqa: BLE001 - surfaced to the user, not swallowed
+        except Exception as e:  # surfaced to the user, not swallowed
             self._set_estimating(False)
             self.app.notify_error(f"estimate failed: {e}")
             return
@@ -879,7 +879,7 @@ class BodyTab(PanelTab):
         # `render_weigh` emits the time now, because the table shows it — so an edit can
         # move it, and has to be able to. Restamped only when the minute actually changed:
         # `measured_at` carries seconds, the grammar's only time token is HH:MM, and those
-        # seconds are the tie-breaker `weight_series` uses to pick a day's reading. That is
+        # seconds are the tie-breaker `weight_series_between` uses to pick a day's reading. That is
         # precisely the case `body.restamp` was written for.
         at = self._restamp_for(
             before["measured_at"], parsed_at=r.at, date=r.date, line=value
@@ -1083,7 +1083,7 @@ class BodyTab(PanelTab):
                 timeout_sec=self.app.cfg.estimate_timeout_sec,
                 model=self.app.cfg.claude_model,
             )
-        except Exception as e:  # noqa: BLE001 - surfaced to the user, not swallowed
+        except Exception as e:  # surfaced to the user, not swallowed
             self._set_inferring(False)
             self._write_activity(r, source="estimated")
             self.app.notify_error(

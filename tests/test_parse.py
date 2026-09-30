@@ -43,11 +43,11 @@ def E(raw):
 
 
 def B(raw):
-    return parse_budget(raw, now=NOW, known_slugs=SLUGS)
+    return parse_budget(raw, known_slugs=SLUGS)
 
 
 def R(raw):
-    return parse_recurring(raw, now=NOW, known_slugs=SLUGS)
+    return parse_recurring(raw, known_slugs=SLUGS)
 
 
 # ── weigh ────────────────────────────────────────────────────────────────
@@ -797,7 +797,7 @@ def test_activity_round_trips(row):
 # ── a weigh-in's clock time is now in the line ───────────────────────────
 # The weight table shows `time` because a day weighed twice rendered as two rows both
 # reading `2026-09-04`, indistinguishable — while `measured_at` was the tie-breaker
-# `weight_series` used to pick between them. What you can see is what you can edit, so
+# `weight_series_between` used to pick between them. What you can see is what you can edit, so
 # the time had to become editable at the same moment it became visible.
 #
 # `render_weigh`'s old comment said re-deriving the stamp "would shave the seconds off

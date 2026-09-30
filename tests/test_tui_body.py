@@ -741,7 +741,7 @@ async def test_submitting_the_prefill_unchanged_preserves_the_stamp_to_the_secon
 ):
     """The reason `restamp` returns None at all. The stored stamp carries seconds the
     grammar cannot express, and for weight those seconds are the tie-breaker
-    `weight_series` uses to pick a day's reading — so the ordinary edit, where you change a
+    `weight_series_between` uses to pick a day's reading — so the ordinary edit, where you change a
     weight or a note and leave the time alone, must not touch them."""
     at = int(dt.datetime(2026, 9, 4, 7, 5, 43).timestamp())
     add_weight(db, kg=80.0, date="2026-09-04", at=at, note="post-run")
@@ -2899,7 +2899,7 @@ async def test_the_food_and_activity_tables_say_which_day_each_row_is(make_app, 
 
 async def test_the_weight_table_shows_the_reading_time(make_app, db):
     """Two readings on one day rendered as two rows both saying `2026-09-04`, and
-    `measured_at` — the tie-breaker `weight_series` uses to choose between them — was
+    `measured_at` — the tie-breaker `weight_series_between` uses to choose between them — was
     invisible. The morning reading is the trend's; the later one is the headline's."""
     from daylogs.body import add_weight
 
@@ -2961,7 +2961,7 @@ async def test_an_empty_window_names_the_key_that_fills_it(make_app, db):
 async def test_editing_a_weights_time_moves_the_stamp(make_app, db):
     """The converse of "an unchanged minute preserves the seconds". The time is in the
     line because the table shows it, so changing it has to actually move `measured_at` —
-    which is the column `weight_series` uses to pick a day's reading, so a time edit that
+    which is the column `weight_series_between` uses to pick a day's reading, so a time edit that
     silently did nothing would leave the trend on the wrong one of two weigh-ins.
     """
     at = int(dt.datetime(2026, 9, 4, 7, 5, 43).timestamp())
