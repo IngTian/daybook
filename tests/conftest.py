@@ -1,7 +1,30 @@
+import datetime as dt
+
 import pytest
 
 from daylogs.config import Config
 from daylogs.db import connect, ensure_schema
+
+# The harness clock is FROZEN, and a test that wants a different today opts *in* with `now=`.
+#
+# The alternative — falling back to the wall clock — makes a test's result depend on when the
+# suite runs. Many seed a dated row and read it back through a window anchored on today, so
+# the calendar alone slides the fixture out of view: no commit, no push, no signal. That has
+# happened six times. On 2026-09-26 eight tests began failing on a `main` last touched on
+# 2026-09-14, whose last CI run — from the 15th — was green, because push-triggered CI cannot
+# see a failure the passage of time caused.
+#
+# Writing fixture dates *relative to the real clock* would trade that for something worse: the
+# row stays "two days old" but which calendar month it lands in changes, so a test straddles
+# `_covered_months`, `roll_month_budgets` and `shift`'s day-clamp on some run dates and not
+# others — passing ~28 days a month and failing ~2, unreproducibly. Relative to THIS constant
+# is the pattern that reads as intent and still resolves identically forever.
+#
+# Mid-month deliberately: on the 29th of a 30-day month a future test doing "a month later"
+# would hit `horizon.shift`'s clamping branch by accident rather than by intent. Naive, like
+# the 200 tests that already pin their own clock, and read as wall time in `cfg.timezone`.
+# Verified: the whole suite is green frozen here, so nothing was bent to fit the date.
+FROZEN_NOW = dt.datetime(2026, 9, 15, 12, 0)
 
 
 @pytest.fixture(autouse=True)
@@ -58,7 +81,7 @@ def make_app(db, make_cfg):
 
     def _make(*, cfg=None, **kw):
         runners = {k: kw.pop(k) for k in list(kw) if k.startswith("runner_")}
-        now = kw.pop("now", None)
+        now = kw.pop("now", None) or (lambda: FROZEN_NOW)
         return DaylogsApp(cfg or make_cfg(**kw), db, now=now, **runners)
 
     return _make

@@ -635,12 +635,35 @@ appended prose where it was convenient rather than editing the map.
   so the calendar alone eventually moves the fixture out of view — `enter` then selects
   nothing, no edit is armed, and the test passes while asserting nothing until the day it
   fails. On 2026-09-28 eight weight tests broke at once, on a comment that had predicted
-  the row would leave Body's 1m window "on 2026-09-26". Two immunisations both work: pin
-  the app clock (`make_app(now=lambda: WEIGHT_DAY)`) or pin the viewing date
-  (`body.viewing_date = DAY`, which anchors the span directly). A dated fixture needs one
-  of them. CI runs **nightly** because of this: push-triggered CI cannot see a failure that
-  the passage of time caused — the last green run on main was thirteen days old while main
-  was red.
+  the row would leave Body's 1m window "on 2026-09-26".
+  **So the harness clock is frozen: `conftest.FROZEN_NOW`, and `make_app` applies it unless a
+  test passes `now=`.** Pinning per test was the documented cure and it is the remembering
+  that failed — 190 tests still read the wall clock while the rule sat in this file. A default
+  inverts it: a test now opts *in* to a date instead of having to opt out of the real one.
+  `tests/test_harness.py` holds it down, including a grep asserting nothing builds `DaylogsApp`
+  outside the fixture, because one default covers every test only while that stays true.
+  Explicit pins stay where they exist — several are about a timezone, not a date.
+  The date is mid-month on purpose (verified green frozen there, so nothing was bent to fit
+  it): on a month edge a future test doing "a month later" lands on `horizon.shift`'s
+  day-clamping branch by accident. And fixture dates written **relative to the real clock**
+  would be worse than the bomb, not better: the row stays "two days old" while the calendar
+  month it lands in changes, so it straddles `_covered_months` and `roll_month_budgets` on
+  some run dates and not others — passing ~28 days a month and failing ~2, unreproducibly.
+  Relative to `FROZEN_NOW` is the pattern that reads as intent and still resolves identically
+  forever.
+  Pinning the viewing date (`body.viewing_date = DAY`) also still works and anchors the span
+  directly.
+  CI still runs **nightly**, now for the reason that survives the frozen clock:
+  `dependencies = ["textual>=8.2,<9"]` with no lockfile, so CI resolves the newest matching
+  release every run and a Textual point release can break `main` with nothing pushed — which
+  matters here because several recorded facts are about Textual *internals* (the private
+  `textual._wait.SLEEP_GRANULARITY`, `animation_level` being an instance attribute, what
+  `Static.content` hands back). The original reason stands as history: the last green run on
+  main was thirteen days old while main was red.
+  One test consults a live clock on purpose — `test_cli.py`'s Kiritimati case, since
+  `cli.main` has no `now` seam and adding one to production to serve a test is not worth it.
+  It reads the clock either side of the call and accepts both days, so a run straddling
+  midnight there cannot flake.
 - **stdlib `sqlite3`, not an ORM.** Measured: the SQLAlchemy/SQLModel stack
   cost 220 ms of import time for zero remaining consumers.
 - **`PRAGMA journal_mode=DELETE`, never WAL.** WAL sidecars sync independently

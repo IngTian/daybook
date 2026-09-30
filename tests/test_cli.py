@@ -267,11 +267,20 @@ def test_day_summary_picks_yesterday_in_the_configured_zone(tmp_path, monkeypatc
 
     monkeypatch.setattr(cli.summary, "generate", fake_generate)
     monkeypatch.setenv("DAYLOGS_HOME", str(tmp_path))
-    assert cli.main(["summary"]) == 0
 
     # Kiritimati is UTC+14, so its "today" is ahead of UTC's for most of the day; the
     # target must be *its* yesterday, whatever zone the machine is in.
-    expected = (
-        dt.datetime.now(ZoneInfo("Pacific/Kiritimati")).date() - dt.timedelta(days=1)
-    ).isoformat()
-    assert seen["date"] == expected, f"dated by the machine, not the config: {seen}"
+    #
+    # Read either side of the call and accept both. This is the one test left that consults a
+    # live clock — `cli.main` has no `now` seam and adding one to production to serve a test
+    # is not worth it — so a run that straddles midnight in Kiritimati would otherwise
+    # compare two different days and fail roughly once in a blue moon, unreproducibly.
+    def kiritimati_yesterday() -> str:
+        day = dt.datetime.now(ZoneInfo("Pacific/Kiritimati")).date()
+        return (day - dt.timedelta(days=1)).isoformat()
+
+    before = kiritimati_yesterday()
+    assert cli.main(["summary"]) == 0
+    assert seen["date"] in {before, kiritimati_yesterday()}, (
+        f"dated by the machine, not the config: {seen}"
+    )
