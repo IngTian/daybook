@@ -11,6 +11,11 @@ _FULL = "█"
 _EMPTY = "·"
 _MARKER = "┃"
 _NO_SHARE = "—"
+# The part of a fill that is a prorated share rather than money that left this period.
+# A *glyph*, not a colour: these bars already carry a budget-status colour on the whole
+# line, and a segment distinguished by hue alone would both fight that and break the rule
+# that colour is never the only signal. `shade` adds the colour on top, afterwards.
+PRORATED_GLYPH = "▒"
 
 
 # Good/bad signalling. Named rather than inlined so one edit changes every
@@ -50,6 +55,30 @@ def mark(text: str, style: str = "") -> str:
     finished lines.
     """
     return f"[{style}]{text}[/]" if style else text
+
+
+def shade(line: str, glyph: str, style: str) -> str:
+    """Style just the run of `glyph` inside a line that has already been measured.
+
+    `mark` colours whole finished lines because markup counts toward `len()`. A bar whose
+    *segments* mean different things still needs part of one line styled, and substituting a
+    run does not change a single printed cell — so the builders' width arithmetic upstream
+    stays correct, and Textual's markup nests, so this composes with the `mark()` a caller
+    wraps around the whole row.
+
+    The glyph is what actually distinguishes the segment; this only emphasises it. Handles
+    the first contiguous run, which is all the bar builders produce — the prorated slice is
+    always one block at the start of the fill.
+    """
+    if not style:
+        return line
+    start = line.find(glyph)
+    if start < 0:
+        return line
+    end = start
+    while end < len(line) and line[end] == glyph:
+        end += 1
+    return f"{line[:start]}[{style}]{line[start:end]}[/]{line[end:]}"
 
 
 def view_row(names: tuple[str, ...], active: str) -> str:
@@ -190,12 +219,31 @@ def signed(value: float) -> str:
     return f"{value:+,.2f}"
 
 
+def _prorated_cells(share: float, scale: float, bar_width: int, filled: int) -> int:
+    """How many of a fill's cells are a prorated share.
+
+    Measured on the bar's own scale so the segment lines up with the fill it sits inside,
+    then clamped to `filled` — a share can exceed the drawn fill when the category is over
+    budget and the fill is clamped, and spilling past it would overstate the spend.
+
+    A non-zero share always gets at least one cell. Same lesson as the `from_zero`
+    sparkline: a real component that rounds to zero cells renders as *absent*, and absent
+    is a different claim from small. A negative share (a prepaid refund) draws nothing —
+    a part-to-whole has no negative slice, which is the stance `ranked_bars` already takes
+    on a net-negative category.
+    """
+    if share <= 0 or filled <= 0 or scale <= 0:
+        return 0
+    return min(max(1, int(round(share / scale * bar_width))), filled)
+
+
 def ranked_bars(
     items: list[tuple[str, float]],
     *,
     width: int,
     label_width: int = 14,
     bar_width: int = 16,
+    prorated: dict[str, float] | None = None,
 ) -> list[str]:
     """`label ████ 43.7%  1,517.91`, one line per item, ordered as given.
 
@@ -210,6 +258,7 @@ def ranked_bars(
     denominator shrank by the refund. Such a row keeps its amount and shows no
     share, because a part-to-whole has no meaningful negative slice.
     """
+    prorated = prorated or {}
     total = sum(v for _, v in items if v > 0) or 1.0
     # The bar yields to the numbers when the panel is narrow. Truncating the line
     # instead cut the amount column off entirely at a 42-column panel, leaving a
@@ -226,7 +275,8 @@ def ranked_bars(
         else:
             filled = 0
             pct = f"{_NO_SHARE:>5}"
-        bar = _FULL * filled + " " * (bar_width - filled)
+        pro = _prorated_cells(prorated.get(name, 0.0), total, bar_width, filled)
+        bar = PRORATED_GLYPH * pro + _FULL * (filled - pro) + " " * (bar_width - filled)
         out.append(f"{label}{bar} {pct} {money(value):>10}")
     return [line[:width] for line in out]
 
@@ -237,6 +287,7 @@ def budget_bars(
     width: int,
     label_width: int = 14,
     bar_width: int = 14,
+    prorated: dict[str, float] | None = None,
 ) -> list[str]:
     """`label ███████░░░ 412/500 ⚠` — spent against its own budget.
 
@@ -250,12 +301,14 @@ def budget_bars(
     and off the panel — the row rendered as bare dots with no numbers at all.
     """
     bar_width = _fit_bar(width, label_width, _BUDGET_TAIL, bar_width)
+    prorated = prorated or {}
     out: list[str] = []
     for name, spent, budget in items:
         if budget > 0:
             frac = spent / budget
             filled = min(max(int(round(frac * bar_width)), 0), bar_width)
-            bar = _FULL * filled + _EMPTY * (bar_width - filled)
+            pro = _prorated_cells(prorated.get(name, 0.0), budget, bar_width, filled)
+            bar = PRORATED_GLYPH * pro + _FULL * (filled - pro) + _EMPTY * (bar_width - filled)
             flag = " ⚠" if spent > budget else "  "
             tail = f"{money(spent):>9} /{money(budget):>9}{flag}"
         else:

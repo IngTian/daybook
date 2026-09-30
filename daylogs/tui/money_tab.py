@@ -26,12 +26,14 @@ from daylogs.tui.widgets import (
     BAD,
     FAINT,
     GOOD,
+    PRORATED_GLYPH,
     WARN,
     budget_bars,
     burn_bar,
     esc,
     mark,
     ranked_bars,
+    shade,
     signed,
     view_row,
     wide_sparkline,
@@ -64,6 +66,20 @@ def _described(row) -> str:
     return f"{row['description']} #{months}" if months else row["description"]
 
 
+# One declaration per panel, read by `compose` and by `_legend`. Written out in both places,
+# the second copy derived which panel it was from the widget id — and a title whose wording
+# depends on that mapping is a worse thing to own than the two strings it saved.
+_PANEL_TITLES = {"budget-title": "BUDGET vs SPENT", "share-title": "WHERE IT WENT"}
+
+
+def _coverage(d) -> str:
+    """Which of a prepayment's months this share is: `#4/12`, or `#4-6/12` when the span is
+    wide enough to catch several of them. Mirrors the `#12` on the charge's own row, so the
+    two lines read as the same payment seen from two places."""
+    first, last, n = d["first"], d["last"], d["months"]
+    return f"#{first}/{n}" if first == last else f"#{first}-{last}/{n}"
+
+
 def _budget_style(spent: float, budget: float) -> str:
     """Over the cap is bad, near it is a warning, a refund is neither."""
     if budget <= 0 or spent < 0:
@@ -91,10 +107,14 @@ class MoneyTab(PanelTab):
         # part-to-whole ranking. v2 left this space empty.
         with Horizontal(classes="panel-row"):
             with Vertical(classes="panel", id="panel-budget"):
-                yield Static("BUDGET vs SPENT", classes="panel-title")
+                yield Static(
+                    _PANEL_TITLES["budget-title"], classes="panel-title", id="budget-title"
+                )
                 yield Static(id="budget-body", classes="panel-body")
             with Vertical(classes="panel", id="panel-share"):
-                yield Static("WHERE IT WENT", classes="panel-title")
+                yield Static(
+                    _PANEL_TITLES["share-title"], classes="panel-title", id="share-title"
+                )
                 yield Static(id="share-body", classes="panel-body")
         yield Static(id="money-panes", classes="muted")
         yield DataTable(id="money-table", cursor_type="row")
@@ -220,12 +240,16 @@ class MoneyTab(PanelTab):
         )
         budget_lines = budget_bars(
             [(c.category, c.spent, c.budget) for c in budgeted],
-            width=self.panel_width("#panel-budget", minimum=28)
+            width=self.panel_width("#panel-budget", minimum=28),
+            prorated={c.category: c.prorated for c in budgeted},
         )
         # Colour whole finished lines, never the pieces: the builders truncate on
-        # character count, and markup would be counted as content.
+        # character count, and markup would be counted as content. `shade` is the one
+        # exception and is safe for the same reason — it substitutes a run that is already
+        # measured, so `plain` is unchanged, and Textual's markup nests so the segment
+        # style survives being inside the row's budget-status colour.
         budget_lines = [
-            mark(line, _budget_style(c.spent, c.budget))
+            mark(shade(line, PRORATED_GLYPH, FAINT), _budget_style(c.spent, c.budget))
             for line, c in zip(budget_lines, budgeted, strict=True)
         ]
         self.query_one("#budget-body", Static).update(
@@ -235,11 +259,16 @@ class MoneyTab(PanelTab):
         ranked = sorted(spent, key=lambda c: c.spent, reverse=True)
         share_lines = ranked_bars(
             [(c.category, c.spent) for c in ranked],
-            width=self.panel_width("#panel-share", minimum=28)
+            width=self.panel_width("#panel-share", minimum=28),
+            prorated={c.category: c.prorated for c in ranked},
         )
+        share_lines = [shade(line, PRORATED_GLYPH, FAINT) for line in share_lines]
         self.query_one("#share-body", Static).update(
             "\n".join(share_lines) if share_lines else "  nothing spent in this window"
         )
+
+        self._legend("budget-title", budget_lines)
+        self._legend("share-title", share_lines)
 
     def _fill_table(self, s) -> None:
         table = self.query_one("#money-table", DataTable)
@@ -278,8 +307,10 @@ class MoneyTab(PanelTab):
 
     def _fill_expenses(self, table) -> None:
         rows = money.query_expenses(self.app.conn, self.view)
+        inflows = money.prepaid_inflows(self.app.conn, self.view.span())
         if not self.view.grouped:
             table.add_columns("date", "description", "category", "amount")
+            self._add_inflows(table, inflows, grouped=False)
             for r in rows:
                 table.add_row(
                     r["date"], Text(_described(r)), Text(r["category"]), fmt(r["amount"])
@@ -289,6 +320,7 @@ class MoneyTab(PanelTab):
             return
 
         table.add_columns("", "date / category", "description", "amount")
+        self._add_inflows(table, inflows, grouped=True)
         for slug, total, count, children in money.group_expenses(
             rows, collapsed=self.view.collapsed
         ):
@@ -302,6 +334,47 @@ class MoneyTab(PanelTab):
                 )
                 self._ids.append(r["id"])
                 self._groups.append("")
+
+    def _legend(self, pid: str, lines: list[str]) -> None:
+        """Name `▒` beside the panel that drew one, and only when it did — an ordinary month
+        carries no legend for a glyph it never shows.
+
+        Asked of the rendered lines rather than of `CategorySpend.prorated`, because the two
+        genuinely disagree: a category with spend and no cap draws no fill to segment, so
+        BUDGET vs SPENT can have nothing to explain while WHERE IT WENT is 100% prorated.
+        """
+        title = _PANEL_TITLES[pid]
+        if any(PRORATED_GLYPH in line for line in lines):
+            title += f"   {mark(f'{PRORATED_GLYPH} prorated', FAINT)}"
+        self.query_one(f"#{pid}", Static).update(title)
+
+    def _add_inflows(self, table, inflows, *, grouped: bool) -> None:
+        """Prorated shares, pinned above the payments and marked as not being payments.
+
+        These are the one place on this pane where the amount is not what left the account,
+        so `⇢` carries that and `FAINT` only emphasises it — colour is never the only
+        signal. The position (`#4/12`) is what ties a line back to the `#12` on the charge
+        itself, which may be months away in either direction.
+
+        Pinned above rather than sorted or grouped in: a share has no date of its own to
+        sort by, and putting it inside a category group would fold it into a total that
+        answers a cash question. The payments below keep their own sort untouched.
+
+        Inert — `_ids` takes -1 and `_groups` takes "", so `enter`, `x` and the group fold
+        all skip these exactly as they skip a group header. The charge's own date is on the
+        line because that is where `g` has to take you to edit it.
+        """
+        for d in inflows:
+            date = Text(d["date"], style=FAINT)
+            label = Text(f"{d['description']} {_coverage(d)}", style=FAINT)
+            share = Text(fmt(d["share"]), style=FAINT)
+            if grouped:
+                table.add_row(Text("⇢", style=FAINT), date, label, share)
+            else:
+                table.add_row(date, Text("⇢ ", style=FAINT) + label,
+                              Text(d["category"], style=FAINT), share)
+            self._ids.append(-1)
+            self._groups.append("")
 
     def _fill_recurring(self, table) -> None:
         table.add_columns("name", "category", "cost", "cycle", "monthly", "on")

@@ -1,12 +1,14 @@
 import pytest
 
 from daylogs.tui.widgets import (
+    BAD,
     arrow,
     budget_bars,
     burn_bar,
     mark,
     money,
     ranked_bars,
+    shade,
     signed,
     sparkline,
     trend_style,
@@ -389,3 +391,103 @@ def test_the_arrow_and_the_colour_agree_about_zero():
     """They are two halves of one judgement, so they must not disagree: `trend_style`
     already treats zero as neither, and the arrow now does too."""
     assert (arrow(0), trend_style(0)) == ("→", "")
+
+
+# ── a bar whose segments mean different things ────────────────────────────
+# A category's `spent` mixes cash that left this period with a share amortised from a
+# payment made elsewhere, and the panel said nothing: subscriptions read 116.75 / 192.21
+# as one green bar with 80.17 of the 116.75 being proration. The glyph is what tells them
+# apart; the colour only emphasises it, which is why `shade` is a separate step applied
+# after the width arithmetic is already done.
+def test_shade_styles_the_run_without_changing_what_is_printed():
+    from textual.content import Content
+
+    line = "subscriptions ▒▒▒███··· 116.75 / 192.21"
+    out = shade(line, "▒", "dim")
+    assert out != line, "it has to actually do something"
+    assert Content.from_markup(out).plain == line, (
+        "markup must not change a single printed cell — the builders already measured"
+    )
+    spans = [(s.start, s.end, s.style) for s in Content.from_markup(out).spans]
+    assert spans == [(14, 17, "dim")], f"exactly the glyph run: {spans}"
+
+
+def test_shade_composes_inside_a_whole_line_colour():
+    """The caller wraps the finished row in its budget-status colour. Textual's markup
+    nests, so the segment style has to survive being inside that."""
+    from textual.content import Content
+
+    line = "grocery       ▒▒███ 540.69 / 500.00"
+    out = mark(shade(line, "▒", "dim"), BAD)
+    c = Content.from_markup(out)
+    assert c.plain == line
+    assert (0, len(line), BAD) in [(s.start, s.end, s.style) for s in c.spans]
+    assert (14, 16, "dim") in [(s.start, s.end, s.style) for s in c.spans]
+
+
+def test_shade_is_a_no_op_without_a_style_or_a_glyph():
+    assert shade("abc ███", "▒", "dim") == "abc ███"
+    assert shade("abc ▒▒▒", "▒", "") == "abc ▒▒▒"
+
+
+def test_budget_bars_marks_the_prorated_part_of_the_fill():
+    line = budget_bars([("subs", 100.0, 200.0)], width=60,
+                       prorated={"subs": 50.0})[0]
+    bar = line[14:28]
+    assert bar.count("▒") == 4 and bar.count("█") == 3, (
+        f"half of a half-full 14-cell bar: {bar!r}"
+    )
+    assert len(bar) == 14, "the bar keeps its width"
+
+
+def test_budget_bars_without_prorated_is_exactly_what_it_was():
+    """The regression guard: every existing caller passes nothing, and must be untouched."""
+    items = [("subs", 100.0, 200.0), ("rent", 750.0, 750.0), ("food", 540.69, 500.0)]
+    assert budget_bars(items, width=60) == budget_bars(items, width=60, prorated={})
+    assert "▒" not in "".join(budget_bars(items, width=60))
+
+
+def test_a_tiny_prorated_share_still_gets_a_cell():
+    """Same lesson as the from_zero sparkline: a real component that rounds to zero cells
+    renders as absent, and absent is a different claim from small."""
+    line = budget_bars([("subs", 100.0, 200.0)], width=60, prorated={"subs": 0.40})[0]
+    assert "▒" in line, f"0.40 of 200 is under half a cell but is not nothing: {line!r}"
+    assert line[14:28].count("▒") == 1
+
+
+def test_the_prorated_run_never_exceeds_the_filled_run():
+    """A share can exceed the drawn fill when the category is over budget and the fill is
+    clamped: 300 of a 100 cap is 42 cells of a 14-cell bar.
+
+    Asserted on the **whole line**, not on a slice of it. A slice of the bar region shows 14
+    glyphs either way, which is exactly how the first version of this test passed while the
+    clamp was removed. The harm is the one `budget_bars` already records for an unclamped
+    width — the bar runs long and pushes the amounts off the end of the line.
+    """
+    line = budget_bars([("subs", 300.0, 100.0)], width=60, prorated={"subs": 300.0})[0]
+    assert line.count("▒") == 14, f"14 cells, not 42: {line!r}"
+    assert "·" not in line, "a full bar has no empty tail"
+    assert "300.00" in line and "100.00" in line, (
+        f"the amounts must survive — an over-long bar shoves them past the width: {line!r}"
+    )
+
+
+def test_a_prorated_refund_draws_no_segment(  ):
+    """A negative share is a refund. A part-to-whole has no negative slice — the same
+    stance `ranked_bars` already takes on a net-negative category."""
+    line = budget_bars([("subs", 100.0, 200.0)], width=60, prorated={"subs": -30.0})[0]
+    assert "▒" not in line, line
+
+
+def test_ranked_bars_marks_the_prorated_part_too():
+    lines = ranked_bars([("subs", 100.0), ("food", 100.0)], width=60,
+                        prorated={"subs": 100.0})
+    assert "▒" in lines[0] and "█" not in lines[0][14:30], (
+        f"all of subs is prorated: {lines[0]!r}"
+    )
+    assert "▒" not in lines[1], f"and none of food is: {lines[1]!r}"
+
+
+def test_ranked_bars_without_prorated_is_exactly_what_it_was():
+    items = [("subs", 100.0), ("food", 250.0), ("refund", -10.0)]
+    assert ranked_bars(items, width=60) == ranked_bars(items, width=60, prorated={})

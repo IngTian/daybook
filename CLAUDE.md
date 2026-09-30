@@ -229,6 +229,15 @@ appended prose where it was convenient rather than editing the map.
   and callers colour whole finished lines; colouring first makes `len()` count
   colour codes and silently sheds real content. DataTable cells use `rich.Text`,
   not markup, because the table measures columns from the cell's own render.
+  **`widgets.shade` is the one exception, and only because it changes nothing that is
+  printed.** A bar whose *segments* mean different things needs part of one line styled, so
+  `shade` substitutes markup around an already-measured run — `Content.from_markup(out).plain`
+  is asserted byte-identical to the input, which is what keeps the builders' arithmetic
+  correct. Textual's markup **nests**, so this composes with the `mark()` the caller wraps
+  around the whole row: a budget line ends up with its status colour over the full line and
+  `dim` over the glyph run inside it, verified as two spans rather than assumed. It handles
+  the first contiguous run, which is all the builders emit. Do not reach for it to colour
+  anything the builders did not mark with a glyph of its own.
 - **The TREND panel plots one series at a time, and only weight fits its own range.**
   `c` cycles weight · intake · net over the window `+`/`-` already control; the two are
   independent, so zooming must not reset the series. Weight is self-fitted because
@@ -294,6 +303,47 @@ appended prose where it was convenient rather than editing the map.
   showing a twelfth of one would be lying about the row. The pane marks it `#N` so the two
   readings do not look like a contradiction, and `render_expense` round-trips the token so a
   displayed marker stays editable.
+  **But the pane also pins the shares it is being counted at, above the payments.** Marking
+  the charge `#12` only helps in the month the charge is *in*; in the other eleven the share
+  arrives with no row at all, so October's header read 72.81 over a list that summed to
+  nothing, and September's read 72.81 over rows saying 270.00 and 603.68. Both are the same
+  missing sentence — which payments are being counted here, and for how much — and "the
+  marker stops that reading as a contradiction" was only ever true one month in twelve.
+  `money.prepaid_inflows(conn, span)` is the one place that answers it: one entry per
+  **charge**, not per covered month, since twelve lines for one subscription would bury the
+  payments the pane exists for. Its `share` is **unrounded** for the same reason
+  `_prepaid_shares` is — round per line and add, and the rows are a cent short of a header
+  that rounds once at the end, which is the original defect wearing a smaller hat. It
+  filters through `_months_filter`, so a second month rule cannot put the list and the total
+  back into disagreement by a different route.
+  The rows are `⇢` **and** faint, never faint alone, because these are the one place on the
+  pane where the amount is not what left the account. They are **inert** — `_ids` takes `-1`
+  like a group header, so `enter`, `x` and the fold all skip them; a share is arithmetic over
+  a charge in another month, and arming an edit from one would write to the wrong month. The
+  charge's own date is on the line because that is where `g` has to take you. Pinned above
+  rather than sorted or grouped in: a share has no date of its own to sort by, and inside a
+  category group it would fold into a total that answers a cash question.
+  **Both panels split the fill the same way**, because `spent` is two different quantities
+  added together and the panels are where the number is actually read: subscriptions showed
+  `116.75 / 192.21` as one green bar with 80.17 of it proration. `CategorySpend.prorated`
+  carries the split and comes from `_prorated_by_category`, which sums **`prepaid_inflows`**
+  rather than re-walking `_prepaid_shares` — the panel's segment and the rows the pane pins
+  are then the same arithmetic, and two readers of one question is exactly how a total and
+  its own list came to disagree in the first place.
+  The segment is a **glyph** (`PRORATED_GLYPH`), with colour added afterwards by `shade`. Not
+  a hue on its own: the budget row already carries a status colour that is load-bearing, and
+  a segment distinguished by hue would both fight it and break "colour is never the only
+  signal". `_prorated_cells` measures on the bar's own scale, clamps to the drawn `filled`
+  (a share can exceed it when an over-budget fill is clamped, and spilling past would
+  overstate the spend), gives a non-zero share **at least one cell** — same lesson as the
+  `from_zero` sparkline, absent is a different claim from small — and draws nothing for a
+  negative share, since a part-to-whole has no negative slice.
+  The glyph is **named in the panel title, and only when one is drawn**, so a month with no
+  prepayment carries no legend it does not need. Asked per panel, because the two genuinely
+  disagree: a category with spend and no cap draws no fill to segment, so BUDGET vs SPENT
+  can have nothing to explain while WHERE IT WENT is 100% prorated. Budget proration itself
+  is untouched — `roll_month_budgets` still writes `monthly_cost`, and the bar's extent is
+  still the cap; what changed is that prorated spend no longer eats it invisibly.
   A covered month counts if the span touches it at all — deliberately the same rule
   `_budget_by_category` already uses, since budgets are stored per calendar month and summed
   over `span.months()` however much of each month the span covers. That is what makes a
