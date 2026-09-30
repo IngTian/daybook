@@ -117,35 +117,18 @@ def morning_weight(conn, *, on_or_before: str | None = None) -> sqlite3.Row | No
     return conn.execute(sql, args).fetchone()
 
 
-def weight_series(conn, *, end_date: str, days: int) -> list[tuple[str, float]]:
-    """One point per day in the window, ascending — each day's **first** reading.
-
-    Collapsing at all is so that a morning weigh-in plus a curious evening re-check does
-    not become two points. Keeping the *first* is so that what survives is comparable:
-    the fasted reading, before food and water. Latest-wins took the low end of every
-    multi-reading day and hid the high one entirely once the window passed `3d`.
-    """
-    rows = conn.execute(
-        """
-        SELECT date, kg FROM weight w
-        WHERE date BETWEEN ? AND ?
-          AND measured_at = (
-              SELECT MIN(measured_at) FROM weight w2 WHERE w2.date = w.date
-          )
-        GROUP BY date
-        ORDER BY date ASC
-        """,
-        (_window_start(_check_date(end_date), days), end_date),
-    ).fetchall()
-    return [(r["date"], r["kg"]) for r in rows]
-
-
 def weight_series_between(
     conn, *, start: str | None, end: str
 ) -> list[tuple[str, float, int]]:
-    """One point per day between `start` and `end` inclusive, ascending.
+    """One point per day between `start` and `end` inclusive, ascending — each day's
+    **first** reading.
 
-    `start=None` means unbounded. Same first-reading-wins rule as weight_series.
+    `start=None` means unbounded. This is now the only implementation of the collapse;
+    `weight_delta` takes its day-count window through here too. Collapsing at all is so
+    that a morning weigh-in plus a curious evening re-check does not become two points.
+    Keeping the *first* is so that what survives is comparable: the fasted reading, before
+    food and water. Latest-wins took the low end of every multi-reading day and hid the high
+    one entirely once the window passed `3d`.
 
     Returns `(date, kg, measured_at)`. The timestamp comes along so the chart can
     place a day's point at the hour it was taken rather than at midnight — the
@@ -209,7 +192,19 @@ def kcal_average(conn, *, start: str | None, end: str) -> int | None:
 
 
 def weight_delta(conn, *, end_date: str, days: int) -> float | None:
-    series = weight_series(conn, end_date=end_date, days=days)
+    """Change across the window, first day's reading to last day's.
+
+    Goes through `weight_series_between` rather than a day-count helper of its own. There used
+    to be one — a `weight_series` taking `days` instead of a start date and not returning the
+    timestamp — and it was a second copy of the same `MIN(measured_at)` collapse. Equivalence
+    was checked before deleting it, over two readings on one day, an exact `measured_at` tie,
+    and rows just outside both bounds; `test_weight_delta_excludes_rows_outside_the_window`
+    is the part of that which a test can still re-derive, and it is the only assertion
+    anywhere that this day-count lower bound excludes rows.
+    """
+    series = weight_series_between(
+        conn, start=_window_start(_check_date(end_date), days), end=end_date
+    )
     if len(series) < 2:
         return None
     return round(series[-1][1] - series[0][1], 2)
@@ -348,7 +343,7 @@ def restamp(at: int, *, date: str, hhmm: str, tz: str) -> int | None:
     Stored timestamps carry seconds; the grammar's only time token is `HH:MM`. So
     re-deriving the timestamp on every edit would quietly shave the seconds off a
     row whose time nobody touched — and for weight those seconds are the
-    tie-breaker `weight_series` uses to pick a day's reading. Returning `None`
+    tie-breaker `weight_series_between` uses to pick a day's reading. Returning `None`
     means "leave the column alone", which is what the caller wants far more often
     than a rewrite.
 
@@ -537,7 +532,7 @@ def resolved_factor(conn, cfg, *, date: str) -> tuple[float | None, str | None]:
 
     Latest-wins rather than first: re-logging supersedes, so correcting a day's factor
     means logging it again. Note this is the *opposite* of the weight series, which
-    collapses a day to its **first** reading — `weight_series` and `morning_weight` both
+    collapses a day to its **first** reading — `weight_series_between` and `morning_weight` both
     take `MIN(measured_at)`, because a fasted reading is the only comparable one. Two rules,
     for two different questions. A row whose factor is NULL —
     an inference that never landed — falls through to the baseline rather than

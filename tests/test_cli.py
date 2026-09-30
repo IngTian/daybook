@@ -203,49 +203,6 @@ def test_export_reports_an_unusable_destination_without_a_traceback(tmp_path, ca
     assert cap.out == "", f"a failed export still printed a path: {cap.out!r}"
 
 
-# ── the daybook -> daylogs migration guard ────────────────────────────────
-
-
-def test_a_pre_rename_data_root_refuses_to_start_and_names_the_fix(tmp_path, monkeypatch, capsys):
-    """Starting fresh beside an old data root would silently hide the history.
-
-    The rename moved the default root from ~/Documents/daybook to
-    ~/Documents/daylogs. If the new root is absent, `connect` would happily
-    create an empty database and the app would open with none of the user's
-    entries — indistinguishable from data loss, from the user's side.
-    """
-    legacy = tmp_path / "daybook"
-    legacy.mkdir()
-    (legacy / "daybook.db").write_bytes(b"")
-    new_root = tmp_path / "daylogs"
-    monkeypatch.setenv("DAYLOGS_HOME", str(new_root))
-
-    # `export` rather than no-args: it runs the same load_config -> guard ->
-    # connect path a bare `day` does, but returns instead of launching a TUI, so
-    # a broken guard fails the assertion rather than hanging the suite.
-    assert main(["export", str(tmp_path / "out")]) == 1
-    err = capsys.readouterr().err
-    assert str(legacy) in err, f"the old path was not named: {err!r}"
-    assert "mv" in err, f"the fix was not spelled out: {err!r}"
-    assert not new_root.exists(), "refusing to start must not create the new root"
-
-
-def test_the_guard_stays_out_of_the_way_once_the_move_has_happened(tmp_path, monkeypatch):
-    """A legacy directory that is merely *present* must not block a migrated user.
-
-    Deliberately not `--version`, which returns before the config is even loaded
-    and would pass whatever the guard did.
-    """
-    legacy = tmp_path / "daybook"
-    legacy.mkdir()
-    (legacy / "daybook.db").write_bytes(b"")
-    new_root = tmp_path / "daylogs"
-    new_root.mkdir()
-    monkeypatch.setenv("DAYLOGS_HOME", str(new_root))
-
-    assert main(["export", str(tmp_path / "out")]) == 0
-
-
 def test_day_summary_picks_yesterday_in_the_configured_zone(tmp_path, monkeypatch):
     """`cfg` was already in hand and unused for this, so the CLI dated its target by the
     *machine's* clock. With `timezone` pinned away from the machine — which the README

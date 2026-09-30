@@ -23,7 +23,6 @@ from daylogs.body import (
     update_weight,
     weight_delta,
     weight_points_between,
-    weight_series,
     weight_series_between,
 )
 from daylogs.config import Config
@@ -65,25 +64,30 @@ def test_list_weight_newest_first_and_since_filter(db):
     assert [r["kg"] for r in list_weight(db, since="2026-08-25")] == [78.2]
 
 
-def test_weight_series_one_point_per_day_first_reading_wins(db):
+def test_one_point_per_day_and_the_first_reading_wins(db):
     """Collapsing at all keeps a curious re-check from becoming a second point. Keeping
     the *first* is what makes the survivor comparable across days: the fasted reading,
     before food and water. See tests/test_weight_of_a_day.py for why it changed."""
     add_weight(db, kg=79.0, date="2026-08-25", at=10)
     add_weight(db, kg=78.6, date="2026-08-25", at=20)
     add_weight(db, kg=78.2, date="2026-08-27", at=30)
-    series = weight_series(db, end_date="2026-08-27", days=7)
-    assert series == [("2026-08-25", 79.0), ("2026-08-27", 78.2)]
+    series = weight_series_between(db, start="2026-08-21", end="2026-08-27")
+    assert [(d, kg) for d, kg, _ in series] == [("2026-08-25", 79.0), ("2026-08-27", 78.2)]
 
 
-def test_weight_series_excludes_outside_window(db):
+def test_weight_delta_excludes_rows_outside_the_window(db):
+    """Retargeted from `weight_series_between`, which this used to cover directly. It is the only
+    assertion anywhere that the day-count *lower* bound excludes rows: every other
+    `weight_delta` test seeds its rows entirely inside the window, so dropping the bound
+    would leave the suite green — the "passes while asserting nothing" shape."""
     add_weight(db, kg=90.0, date="2026-07-01", at=1)
     add_weight(db, kg=78.2, date="2026-08-27", at=2)
-    assert weight_series(db, end_date="2026-08-27", days=7) == [("2026-08-27", 78.2)]
+    assert weight_delta(db, end_date="2026-08-27", days=7) is None, "the July row is outside"
+    assert weight_delta(db, end_date="2026-08-27", days=90) == -11.8, "and inside at 90d"
 
 
-def test_weight_series_empty_when_no_data(db):
-    assert weight_series(db, end_date="2026-08-27", days=30) == []
+def test_the_series_is_empty_when_no_data(db):
+    assert weight_series_between(db, start="2026-07-29", end="2026-08-27") == []
 
 
 def test_weight_delta_uses_oldest_in_window(db):
@@ -420,7 +424,7 @@ def test_restamp_follows_a_changed_date_even_when_the_minute_is_the_same(db):
 
 def test_restamp_still_returns_none_when_neither_half_moved(db):
     """The whole reason `None` exists: the stamp carries seconds the grammar cannot express,
-    and those seconds are the tie-breaker `weight_series` uses to pick a day's reading."""
+    and those seconds are the tie-breaker `weight_series_between` uses to pick a day's reading."""
     assert restamp(_stamp(2026, 8, 20, 7, 5, 43), date="2026-08-20", hhmm="07:05",
                    tz=RE_TZ) is None
 

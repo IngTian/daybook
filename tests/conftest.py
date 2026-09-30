@@ -1,4 +1,5 @@
 import datetime as dt
+import inspect
 
 import pytest
 
@@ -96,3 +97,19 @@ def type_into():
             await pilot.press("space" if ch == " " else ch)
 
     return _type
+
+def call_parser(parser, raw, *, now, known_slugs):
+    """Call `parser` with only the keyword arguments it declares.
+
+    Shared because `test_hints.py` and `test_readme.py` both loop over every parser, and
+    passing both kwargs unconditionally is what kept five unread parameters alive. Two copies
+    of the filter meant a third argument, or a rename, had to be fixed in both — and the one
+    that was missed would keep passing by silently omitting it, which is the
+    "passes while asserting nothing" shape this suite polices elsewhere.
+
+    `known_slugs` is taken as a value rather than called here, so a parser that does not want
+    it costs no config read.
+    """
+    accepts = inspect.signature(parser).parameters
+    kw = {k: v for k, v in (("now", now), ("known_slugs", known_slugs)) if k in accepts}
+    return parser(raw, **kw)

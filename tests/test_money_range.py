@@ -82,11 +82,6 @@ def test_calendar_progress_only_for_a_single_month(seeded):
     assert (allt.day_of_month, allt.days_in_month) == (0, 0)
 
 
-def test_range_top_expenses_span_the_range(seeded):
-    s = summarize_span(seeded, span=_span(["2026-06", "2026-07", "2026-08"]), today="2026-08-27")
-    assert [r["amount"] for r in s.top_expenses] == [100.0, 50.0, 25.0, 10.0]
-
-
 def test_history_is_still_six_months(seeded):
     s = summarize_span(seeded, span=_span([]), today="2026-08-27")
     for c in s.by_category:

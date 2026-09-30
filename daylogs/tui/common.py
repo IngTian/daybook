@@ -81,7 +81,7 @@ class PanelTab(Vertical):
         """
         try:
             avail = self.query_one(selector).content_size.width
-        except Exception:  # noqa: BLE001 - before the first layout there is no size
+        except Exception:  # before the first layout there is no size
             avail = 0
         if not avail:
             self._used_fallback = True

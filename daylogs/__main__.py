@@ -53,16 +53,6 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     cfg = load_config()
-    if (stale := _legacy_root_to_move(cfg.root)) is not None:
-        print(
-            f"Your data is still under the old name: {stale}\n"
-            f"daylogs was renamed from daybook. Move it, then run again:\n"
-            f"    mv {stale} {cfg.root}\n"
-            f"    mv {cfg.root / 'daybook.db'} {cfg.db_path}",
-            file=sys.stderr,
-        )
-        return 1
-
     setup_logging()
     conn = connect(cfg.db_path)
     ensure_schema(conn)
@@ -77,26 +67,6 @@ def main(argv: list[str] | None = None) -> int:
         return _tui(conn, cfg)
     finally:
         conn.close()
-
-
-def _legacy_root_to_move(root: Path) -> Path | None:
-    """The pre-rename data root, when it holds the only copy of the data.
-
-    Renaming the project moved the default root from ~/Documents/daybook to
-    ~/Documents/daylogs. Without this check the first run after upgrading finds
-    no database, creates an empty one, and presents a working app with none of
-    your history in it — which reads as data loss even though nothing was
-    deleted. Refusing to start is the kinder failure, and it can name the exact
-    two commands that fix it.
-
-    Only fires when the new root is genuinely absent, so it costs nothing on a
-    fresh install and disappears as soon as the move happens. Deletable once no
-    installation predates the rename.
-    """
-    legacy = root.parent / "daybook"
-    if root.exists() or not (legacy / "daybook.db").is_file():
-        return None
-    return legacy
 
 
 def _summary(conn, cfg, date: str | None) -> int:
@@ -116,7 +86,7 @@ def _summary(conn, cfg, date: str | None) -> int:
         content = asyncio.run(
             summary.generate(conn, cfg, date=target, runner=claude.run_oneshot_text)
         )
-    except Exception as e:  # noqa: BLE001 - top-level CLI boundary
+    except Exception as e:  # top-level CLI boundary
         print(str(e), file=sys.stderr)
         return 1
     print(content)

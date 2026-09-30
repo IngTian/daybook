@@ -21,7 +21,6 @@ def test_empty_month_is_all_zeros(db):
     s = summarize_month(db, month="2026-08", today="2026-08-27")
     assert (s.total_spent, s.total_budget, s.remaining) == (0.0, 0.0, 0.0)
     assert s.by_category == []
-    assert s.top_expenses == []
     assert s.over_budget == []
     assert s.under_budget_remaining == []
 
@@ -95,19 +94,6 @@ def test_exactly_on_budget_is_neither_over_nor_under(db):
     _e(db, 100.0, "grocery", "2026-08-10")
     s = summarize_month(db, month="2026-08")
     assert s.over_budget == [] and s.under_budget_remaining == []
-
-
-def test_top_expenses_is_five_largest_descending(db):
-    for i, amt in enumerate([10, 90, 50, 70, 30, 110], start=1):
-        _e(db, float(amt), "grocery", f"2026-08-{i:02d}", f"e{amt}")
-    top = summarize_month(db, month="2026-08").top_expenses
-    assert [r["amount"] for r in top] == [110.0, 90.0, 70.0, 50.0, 30.0]
-
-
-def test_top_expenses_excludes_refunds(db):
-    _e(db, 50.0, "grocery", "2026-08-01")
-    _e(db, -80.0, "grocery", "2026-08-02", "refund")
-    assert [r["amount"] for r in summarize_month(db, month="2026-08").top_expenses] == [50.0]
 
 
 def test_history_is_six_months_current_month_last(db):

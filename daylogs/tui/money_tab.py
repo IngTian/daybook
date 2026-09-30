@@ -761,7 +761,7 @@ class MoneyTab(PanelTab):
 
     def _submit_budget(self, value: str) -> None:
         cfg = self.app.cfg
-        r = parse_budget(value, now=self.app.now(), known_slugs=money.slugs(cfg))
+        r = parse_budget(value, known_slugs=money.slugs(cfg))
         month = self._budget_month()
         money.upsert_budget(
             self.app.conn,
@@ -802,7 +802,7 @@ class MoneyTab(PanelTab):
 
     def _submit_recurring(self, value: str) -> None:
         cfg = self.app.cfg
-        r = parse_recurring(value, now=self.app.now(), known_slugs=money.slugs(cfg))
+        r = parse_recurring(value, known_slugs=money.slugs(cfg))
         row_id = self._take_editing("recurring")
         if row_id is None:
             money.upsert_recurring(

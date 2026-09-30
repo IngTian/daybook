@@ -135,13 +135,30 @@ appended prose where it was convenient rather than editing the map.
   `date` stays authoritative over `ate_at` when the two disagree after a zone change
   (Aug 27 in Toronto is Aug 28 in Kiritimati), so the render is asserted to be *stable*
   rather than instant-preserving: it settles once instead of creeping on every edit.
-- **Activities are assumed to be logged faithfully and in full, every day.** A stated
-  premise, not an inference: a day with no activity row *is* an ordinary day and takes
-  the profile baseline, and the inference is handed the whole day because the whole day
-  is assumed present. So there is no partial-logging machinery and no "did you forget"
-  nagging, and none should be added without revisiting this. It does **not** extend to
-  food, which is logged sparsely — which is why `kcal_series_between` and
-  `net_series_between` still treat a foodless day as absent rather than as a fast.
+- **An unlogged day is not a missing day — it is an ordinary one.** You log a day when it was
+  *out of the ordinary*; a day with no activity row takes the profile baseline, which is
+  what the owner confirmed he relies on. So there is no partial-logging machinery and no
+  "did you forget" nagging, and none should be added: there is nothing to forget. The code
+  has always said this — `body.py`'s "otherwise the profile baseline, which is the common
+  case and needs no input", `db.py`'s "an ordinary day needs no entry at all",
+  `summary.py`'s "`profile` is the user's ordinary day and is not news".
+  This bullet used to open "activities are assumed to be logged faithfully and in full, every
+  day", which was false and read as a demand for daily discipline nobody had agreed to. An
+  audit read the low row count as an abandoned feature and was wrong twice over: the table
+  was days old when it was counted, and its first row lands on the day it shipped — so the
+  number measured how long the column had existed, not anyone's intent. **Never price feature
+  adoption against the age of the data**; this app's weight and expense history predates most
+  of its features, so a per-feature count has to be read against the ship date of that
+  feature. (Deliberately no figures here: a row count is the owner's own behaviour, which is
+  the class of fact the no-real-data rule below covers.)
+  **The second clause was true and stays**: the inference is handed the whole day, not the
+  new entry. `body_tab` re-queries `list_activity(conn, date=r.date)` and passes
+  `activities=[*logged, r.description]` because a PAL is not additive — that re-query looks
+  redundant beside the description the worker already holds, and this is where it is recorded
+  as deliberate.
+  Do **not** describe activity as "sparse": that word is reserved here for the opposite
+  treatment. A foodless day is *absent* from `kcal_series_between`/`net_series_between`
+  rather than counted as a fast; an activity-less day is *kept*, at `day_baseline`.
 - **The activity factor is never defaulted, and `body.day_tdee` is the only place
   BMR is multiplied by it.** Assuming `desk` for an unset profile would raise
   maintenance 20% and silently restate every figure on screen and in every digest
@@ -298,7 +315,7 @@ appended prose where it was convenient rather than editing the map.
   tab whose whole question is "am I inside the budget this month".
   **Totals prorate; lists do not.** `_spent_by_category` and the six-month history exclude
   `prepaid_months IS NOT NULL` from their SQL sum and add the shares back by covered month.
-  The expenses pane, `top_expenses` and the digest's day list keep the real charge, because
+  The expenses pane and the digest's day list keep the real charge, because
   those answer a cash question — 240.00 is what left the account, and a list of payments
   showing a twelfth of one would be lying about the row. The pane marks it `#N` so the two
   readings do not look like a contradiction, and `render_expense` round-trips the token so a
@@ -361,6 +378,28 @@ appended prose where it was convenient rather than editing the map.
   makes the ALTER cheap and leaves old rows meaningful (NULL = "an ordinary expense"). A
   change that needs to *rewrite* rows is where this stops being enough, and that is a
   decision to take deliberately rather than by appending here.
+  **The version stamp only ever moves forward, and a newer database is logged, not ignored.**
+  `ensure_schema` writes `PRAGMA user_version` only when `SCHEMA_VERSION` is higher, because
+  iCloud syncs one file between installs and the daily `day` is a separate `uv tool install`
+  that can lag this checkout — so this function does run against databases newer than itself,
+  and a bare assignment moved the stamp *down*. Be precise about what that buys: it cannot
+  repair the past, since an older release runs its own bare-assignment copy; it guarantees
+  only that no future version lies about a file it did not write. The `current >
+  SCHEMA_VERSION` branch warns rather than proceeding silently, because nothing else reads
+  the pragma: `_DDL` is `IF NOT EXISTS` and `_ADD_COLUMNS` is additive, so an older reader
+  would otherwise no-op every statement and then read and write a schema it does not know.
+  Don't collapse it back to the one-liner; `test_the_version_stamp_only_ever_moves_forward`
+  is the tripwire.
+  **There is no `PRAGMA foreign_keys=ON`, because there are no foreign keys.**
+  `PRAGMA foreign_key_list` returns nothing for all seven tables, and `categories.py` names
+  "a table, three foreign keys and a service" as the design this app rejected. The pragma's
+  other effects govern `ALTER TABLE RENAME` and `DROP TABLE`, neither of which this codebase
+  issues. It read as a safety measure while enforcing nothing, under a test asserting the
+  pragma was merely *set*. `test_the_schema_declares_no_foreign_keys` replaces it and
+  deliberately does not observe the pragma: if a table ever grows a `REFERENCES` clause that
+  test fails, and the right response is to decide whether the constraint should be enforced
+  at runtime — SQLite defaults the pragma OFF per connection, so a declared-but-unenforced
+  foreign key accumulates orphans silently. Relaxing the assertion is the wrong response.
 - **An empty state names the fix.** A month nobody rolled has no budget rows, and
   "0.00 budget / 1,234.00 over" is true, useless, and reads as stale data. It says
   what `r` would do instead. `money.pending_roll` must agree with

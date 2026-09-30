@@ -162,7 +162,7 @@ class RecurringInput:
     cycle: str
 
 
-def parse_weigh(raw: str, *, now: dt.datetime, known_slugs=frozenset()) -> WeighInput:
+def parse_weigh(raw: str, *, now: dt.datetime) -> WeighInput:
     toks = _tokens(raw)
     kg = _leading_amount(toks, "a weight, e.g. 78.2")
     if not 0 < kg <= MAX_KG:
@@ -178,7 +178,7 @@ def render_weigh(row, tz: str) -> str:
 
     The time is in the line because the table shows it. A day weighed twice rendered as
     two rows both reading the same date, indistinguishable — while `measured_at` was the
-    tie-breaker `weight_series` used to pick between them. What you can see is what you
+    tie-breaker `weight_series_between` used to pick between them. What you can see is what you
     can edit, so the time became editable in the same change that made it visible.
 
     This used to emit no time, on the grounds that "re-deriving it from an HH:MM token
@@ -197,7 +197,7 @@ def render_weigh(row, tz: str) -> str:
     return " ".join(parts)
 
 
-def parse_food(raw: str, *, now: dt.datetime, known_slugs=frozenset()) -> FoodInput:
+def parse_food(raw: str, *, now: dt.datetime) -> FoodInput:
     """kcal comes only from `=`. A trailing bare integer used to mean calories,
     which made `coffee 2` undecidable between a 2 kcal coffee and a description
     that ends in a number."""
@@ -264,7 +264,7 @@ def to_factor(value: str) -> float:
     return factor
 
 
-def parse_activity(raw: str, *, now: dt.datetime, known_slugs=frozenset()) -> ActivityInput:
+def parse_activity(raw: str, *, now: dt.datetime) -> ActivityInput:
     """What you did, and optionally what the whole day came to.
 
     `=` carries the day's multiplier; omitting it means "estimate this", exactly as
@@ -429,7 +429,7 @@ def render_expense(row) -> str:
     return " ".join(parts)
 
 
-def parse_budget(raw: str, *, now: dt.datetime, known_slugs: frozenset[str]) -> BudgetInput:
+def parse_budget(raw: str, *, known_slugs: frozenset[str]) -> BudgetInput:
     toks = _tokens(raw)
     amount = _leading_amount(toks, "a positive amount, e.g. 500 !grocery")
     if amount <= 0:
@@ -452,7 +452,7 @@ def render_budget(row) -> str:
     return f"{row['amount']:.2f} {sigil.escape(row['name'])} !{row['category']}"
 
 
-def parse_recurring(raw: str, *, now: dt.datetime, known_slugs: frozenset[str]) -> RecurringInput:
+def parse_recurring(raw: str, *, known_slugs: frozenset[str]) -> RecurringInput:
     toks = _tokens(raw)
     cost = _leading_amount(toks, "a positive cost, e.g. 20.99 Streaming !subscriptions")
     if cost <= 0:

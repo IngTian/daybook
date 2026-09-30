@@ -19,6 +19,7 @@ the receiving device. daylogs is read-heavy; the write cost is noise.
 
 from __future__ import annotations
 
+import logging
 import sqlite3
 from pathlib import Path
 
@@ -135,7 +136,13 @@ def connect(path: Path | str) -> sqlite3.Connection:
     conn = sqlite3.connect(p, isolation_level=None)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA journal_mode=DELETE")
-    conn.execute("PRAGMA foreign_keys=ON")
+    # No `PRAGMA foreign_keys=ON`: the schema declares no foreign keys at all
+    # (`PRAGMA foreign_key_list` returns nothing for all seven tables), and
+    # `categories.py` names "a table, three foreign keys and a service" as the design this
+    # app deliberately rejected. The pragma's only other effects govern `ALTER TABLE RENAME`
+    # and `DROP TABLE`, neither of which this codebase issues — `_ADD_COLUMNS` only ever
+    # ADDs. It read as a safety measure while enforcing nothing; its test asserted the
+    # pragma was set rather than that anything was enforced.
     return conn
 
 
@@ -154,7 +161,34 @@ def ensure_schema(conn: sqlite3.Connection) -> None:
         have = {r[1] for r in conn.execute(f"PRAGMA table_info({table})")}
         if column not in have:
             conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {decl}")
-    conn.execute(f"PRAGMA user_version={SCHEMA_VERSION}")
+    # Monotonic, never a bare assignment, because the stamp's whole job is to say which
+    # shapes a reader can expect and a bare `PRAGMA user_version=N` can move it *down*.
+    # iCloud syncs one database between installs and the daily `day` is a separate
+    # `uv tool install` that can lag this checkout, so `ensure_schema` does run against
+    # databases newer than the code running it.
+    #
+    # Be precise about what this buys: it cannot repair the past. A release older than this
+    # one runs its own `ensure_schema` with the bare assignment, so an old `day` will still
+    # stamp a newer file down — the guard only holds from here forward. What it does
+    # guarantee is that no *future* version of this function lies about a file it did not
+    # write.
+    #
+    # And a newer database is not silently accepted. Nothing else reads `user_version`, so
+    # without this the one place that knows would notice and say nothing: `_DDL` is
+    # `IF NOT EXISTS` and `_ADD_COLUMNS` is additive, so an older reader opens a newer file,
+    # no-ops every statement, and then reads and writes a schema it does not know about.
+    # Additive-only evolution makes that survivable today rather than safe in principle,
+    # which is exactly the kind of thing worth a line in the log rather than silence.
+    current = conn.execute("PRAGMA user_version").fetchone()[0]
+    if SCHEMA_VERSION > current:
+        conn.execute(f"PRAGMA user_version={SCHEMA_VERSION}")
+    elif current > SCHEMA_VERSION:
+        logging.getLogger(__name__).warning(
+            "database is at schema %d but this daylogs knows %d — leaving the stamp alone; "
+            "columns added by the newer version are invisible here",
+            current,
+            SCHEMA_VERSION,
+        )
 
 
 def table_names(conn: sqlite3.Connection) -> list[str]:

@@ -57,7 +57,9 @@ def export_csv(
         # return insertion order for a bare SELECT today, so removing the ORDER BY
         # fails no test — but the ordering is what makes two exports of an unchanged
         # database byte-identical, and SQL promises nothing without it.
-        cur = conn.execute(f"SELECT * FROM {table} ORDER BY rowid")  # noqa: S608 - from sqlite_master
+        # The f-string is safe: `table` comes from `table_names(conn)`, which reads
+        # `sqlite_master`, so no caller-supplied text ever reaches this SQL.
+        cur = conn.execute(f"SELECT * FROM {table} ORDER BY rowid")
         # newline="" is required by the csv module, not optional tidiness: without
         # it a value containing a newline — every generated summary — is written
         # with \r\n and read back as extra rows on some platforms.
@@ -70,8 +72,12 @@ def export_csv(
 
 
 def row_counts(conn: sqlite3.Connection) -> dict[str, int]:
-    """Rows per table, for the CLI to report what it just wrote."""
+    """Rows per table, for the CLI to report what it just wrote.
+
+    The f-string is safe for the same reason as in `export_csv`: `t` comes from
+    `table_names(conn)`, which reads `sqlite_master`, never a caller.
+    """
     return {
-        t: conn.execute(f"SELECT count(*) FROM {t}").fetchone()[0]  # noqa: S608 - from sqlite_master
+        t: conn.execute(f"SELECT count(*) FROM {t}").fetchone()[0]
         for t in table_names(conn)
     }

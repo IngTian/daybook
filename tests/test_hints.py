@@ -10,6 +10,7 @@ from pathlib import Path
 from zoneinfo import ZoneInfo
 
 import pytest
+from conftest import call_parser
 
 from daylogs.categories import slugs
 from daylogs.parse import (
@@ -102,7 +103,7 @@ def test_every_example_is_a_line_the_parser_accepts(label):
     """An example a reader copies verbatim must work. Otherwise the hint is worse
     than no hint."""
     hint = hints.for_label(label)
-    PARSERS[label](hint.example, now=NOW, known_slugs=slugs())
+    call_parser(PARSERS[label], hint.example, now=NOW, known_slugs=slugs())
 
 
 @pytest.mark.parametrize("label", sorted(PLAIN_PARSERS))

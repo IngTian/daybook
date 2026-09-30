@@ -10,6 +10,7 @@ from pathlib import Path
 from zoneinfo import ZoneInfo
 
 import pytest
+from conftest import call_parser
 
 from daylogs.categories import slugs
 from daylogs.parse import (
@@ -95,8 +96,9 @@ def test_readme_example_parses(prompt: str, example: str) -> None:
         plain(example)
         return
 
-    # All parsers take (raw, *, now, known_slugs) as keyword args.
-    result = parser(example, now=NOW, known_slugs=slugs())
+    # Only the keyword arguments each parser declares — five parsers do not take one of
+    # these, and hard-coding both is what kept those five parameters alive unread.
+    result = call_parser(parser, example, now=NOW, known_slugs=slugs())
 
     # Assert parsed fields match the sigils present in the example.
     if "!grocery" in example:
@@ -228,7 +230,7 @@ def test_the_readme_never_describes_weight_as_last_reading_wins():
 
     A reader with a bad weigh-in would re-weigh to fix the trend, and the trend keeps the
     first reading. Latest-wins is the *activity factor's* rule; weight is the opposite, and
-    `weight_series`/`morning_weight` both take `MIN(measured_at)` to prove it.
+    `weight_series_between`/`morning_weight` both take `MIN(measured_at)` to prove it.
     """
     text = README.read_text()
     assert "last-reading-wins" not in text, (
