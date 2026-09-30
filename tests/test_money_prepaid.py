@@ -494,3 +494,93 @@ async def test_the_grouped_pane_marks_the_share_too(make_app, db, type_into):
         first = [str(c) for c in table.get_row(list(table.rows)[0])]
     assert "⇢" in first[0], f"the marker column carries it when grouped: {first}"
     assert any("Insurance #2/12" in c for c in first), first
+
+
+def _content(app, panel_id):
+    """A panel's text as a parsed `Content`, whichever shape `.content` is in.
+
+    `Static.content` hands back the raw markup string it was updated with, so the spans
+    have to be parsed to assert on a style — and `plain` is the only honest way to look for
+    a glyph, since the markup characters are not printed.
+    """
+    from textual.content import Content
+    from textual.widgets import Static
+
+    raw = app.query_one(panel_id, Static).content
+    return Content.from_markup(raw) if isinstance(raw, str) else raw
+
+
+# ── the panels ───────────────────────────────────────────────────────────
+def test_the_summary_splits_each_category_into_paid_and_prorated(db):
+    """`spent` mixes cash out in this span with a share amortised from a payment made
+    elsewhere. The panels need them apart, and they have to still add up."""
+    add_expense(db, amount=240.0, description="Insurance", category="subscriptions",
+                date="2026-09-14", prepaid_months=12)
+    add_expense(db, amount=9.99, description="Streaming", category="subscriptions",
+                date="2026-09-20")
+    s = summarize_month(db, month="2026-09", today="2026-09-30")
+    cat = next(c for c in s.by_category if c.category == "subscriptions")
+    assert (cat.spent, cat.prorated) == (29.99, 20.0)
+    assert round(cat.spent - cat.prorated, 2) == 9.99, "the rest is cash out this month"
+
+
+def test_a_category_with_no_prepayment_reports_no_prorated_part(db):
+    add_expense(db, amount=52.10, description="market", category="grocery", date="2026-09-03")
+    s = summarize_month(db, month="2026-09", today="2026-09-30")
+    assert next(c for c in s.by_category if c.category == "grocery").prorated == 0.0
+
+
+async def test_both_panels_mark_the_prorated_segment(make_app, db, type_into):
+    """`▒` in the fill and dim on top of it — the glyph is the signal, the colour only
+    emphasises, and the row keeps its own budget-status colour around both."""
+    upsert_recurring(db, name="Insurance", cost=240.0, cycle="annually",
+                     category="subscriptions")
+    roll_month_budgets(db, month="2026-09")
+    app = make_app(now=lambda: NOW)
+    async with app.run_test(size=(120, 40)) as pilot:
+        await go_money(pilot, app)
+        await pilot.press("e")
+        await type_into(pilot, "240 Insurance !subscriptions #12")
+        await pilot.press("enter")
+        await pilot.pause()
+        budget = _content(app, "#budget-body")
+        share = _content(app, "#share-body")
+    for name, c in (("BUDGET vs SPENT", budget), ("WHERE IT WENT", share)):
+        assert "▒" in c.plain, f"{name} must carry the glyph: {c.plain!r}"
+        i = c.plain.index("▒")
+        styles = [s.style for s in c.spans if s.start <= i < s.end]
+        assert "dim" in styles, f"{name} must dim the run: {styles}"
+
+
+async def test_a_month_with_no_prepayment_draws_no_segment(make_app, db, type_into):
+    """The regression guard on screen: an ordinary month must look exactly as it did."""
+    app = make_app(now=lambda: NOW)
+    async with app.run_test(size=(120, 40)) as pilot:
+        await go_money(pilot, app)
+        await pilot.press("e")
+        await type_into(pilot, "52.10 market !grocery")
+        await pilot.press("enter")
+        await pilot.pause()
+        budget = _content(app, "#budget-body").plain
+        share = _content(app, "#share-body").plain
+    assert "▒" not in budget and "▒" not in share, (budget, share)
+
+
+async def test_the_glyph_is_named_on_screen_only_when_one_is_drawn(make_app, db, type_into):
+    """`▒` is new, so it does not get to arrive unexplained — and an ordinary month must not
+    carry a legend for something it never draws."""
+    app = make_app(now=lambda: NOW)
+    async with app.run_test(size=(120, 40)) as pilot:
+        await go_money(pilot, app)
+        await pilot.press("e")
+        await type_into(pilot, "52.10 market !grocery")
+        await pilot.press("enter")
+        await pilot.pause()
+        assert "prorated" not in _content(app, "#budget-title").plain
+        assert "prorated" not in _content(app, "#share-title").plain
+        await pilot.press("e")
+        await type_into(pilot, "240 Insurance !subscriptions #12")
+        await pilot.press("enter")
+        await pilot.pause()
+        share = _content(app, "#share-title").plain
+    assert "▒ prorated" in share, f"named beside the panel that drew it: {share!r}"

@@ -413,6 +413,9 @@ class CategorySpend:
     spent: float
     delta: float
     history: list[float] = field(default_factory=list)
+    # How much of `spent` is a prorated share rather than money that left in this span.
+    # Appended last so positional construction of the fields above keeps working.
+    prorated: float = 0.0
 
 
 @dataclass
@@ -492,6 +495,7 @@ def summarize_span(
 
     spent_by_cat = _spent_by_category(conn, span)
     budget_by_cat = _budget_by_category(conn, months)
+    prorated_by_cat = _prorated_by_category(conn, span)
 
     by_category: list[CategorySpend] = []
     for cat in sorted(set(budget_by_cat) | set(spent_by_cat)):
@@ -504,6 +508,7 @@ def summarize_span(
                 spent=spent,
                 delta=round(budget - spent, 2),
                 history=history.get(cat, [0.0] * HISTORY_MONTHS),
+                prorated=prorated_by_cat.get(cat, 0.0),
             )
         )
 
@@ -687,6 +692,20 @@ def _spent_by_category(conn, span: Span | None) -> dict[str, float]:
     for ym, cat, share in _prepaid_shares(conn):
         if keep is None or ym in keep:
             out[cat] = out.get(cat, 0.0) + share
+    return {k: round(v, 2) for k, v in out.items()}
+
+
+def _prorated_by_category(conn, span: Span | None) -> dict[str, float]:
+    """How much of each category's spend is a prorated share, not cash out in this span.
+
+    Derived from `prepaid_inflows` rather than re-walking `_prepaid_shares`, so the panel's
+    segment and the rows the expenses pane pins are the *same* arithmetic — two readers of
+    the same question is exactly how a total and the list under it came to disagree in the
+    first place. Summed unrounded and rounded once, like everything else on this path.
+    """
+    out: dict[str, float] = {}
+    for d in prepaid_inflows(conn, span):
+        out[d["category"]] = out.get(d["category"], 0.0) + d["share"]
     return {k: round(v, 2) for k, v in out.items()}
 
 

@@ -26,12 +26,14 @@ from daylogs.tui.widgets import (
     BAD,
     FAINT,
     GOOD,
+    PRORATED_GLYPH,
     WARN,
     budget_bars,
     burn_bar,
     esc,
     mark,
     ranked_bars,
+    shade,
     signed,
     view_row,
     wide_sparkline,
@@ -99,10 +101,10 @@ class MoneyTab(PanelTab):
         # part-to-whole ranking. v2 left this space empty.
         with Horizontal(classes="panel-row"):
             with Vertical(classes="panel", id="panel-budget"):
-                yield Static("BUDGET vs SPENT", classes="panel-title")
+                yield Static("BUDGET vs SPENT", classes="panel-title", id="budget-title")
                 yield Static(id="budget-body", classes="panel-body")
             with Vertical(classes="panel", id="panel-share"):
-                yield Static("WHERE IT WENT", classes="panel-title")
+                yield Static("WHERE IT WENT", classes="panel-title", id="share-title")
                 yield Static(id="share-body", classes="panel-body")
         yield Static(id="money-panes", classes="muted")
         yield DataTable(id="money-table", cursor_type="row")
@@ -228,12 +230,16 @@ class MoneyTab(PanelTab):
         )
         budget_lines = budget_bars(
             [(c.category, c.spent, c.budget) for c in budgeted],
-            width=self.panel_width("#panel-budget", minimum=28)
+            width=self.panel_width("#panel-budget", minimum=28),
+            prorated={c.category: c.prorated for c in budgeted},
         )
         # Colour whole finished lines, never the pieces: the builders truncate on
-        # character count, and markup would be counted as content.
+        # character count, and markup would be counted as content. `shade` is the one
+        # exception and is safe for the same reason — it substitutes a run that is already
+        # measured, so `plain` is unchanged, and Textual's markup nests so the segment
+        # style survives being inside the row's budget-status colour.
         budget_lines = [
-            mark(line, _budget_style(c.spent, c.budget))
+            mark(shade(line, PRORATED_GLYPH, FAINT), _budget_style(c.spent, c.budget))
             for line, c in zip(budget_lines, budgeted, strict=True)
         ]
         self.query_one("#budget-body", Static).update(
@@ -243,11 +249,24 @@ class MoneyTab(PanelTab):
         ranked = sorted(spent, key=lambda c: c.spent, reverse=True)
         share_lines = ranked_bars(
             [(c.category, c.spent) for c in ranked],
-            width=self.panel_width("#panel-share", minimum=28)
+            width=self.panel_width("#panel-share", minimum=28),
+            prorated={c.category: c.prorated for c in ranked},
         )
+        share_lines = [shade(line, PRORATED_GLYPH, FAINT) for line in share_lines]
         self.query_one("#share-body", Static).update(
             "\n".join(share_lines) if share_lines else "  nothing spent in this window"
         )
+
+        # `▒` is a new glyph, so it gets named on screen — and only when one is drawn, so an
+        # ordinary month carries no legend it does not need. Each title asks its own panel,
+        # because the two can disagree: a category with spend and no cap draws no fill to
+        # segment, so BUDGET vs SPENT can have nothing to explain while WHERE IT WENT does.
+        for pid, lines in (("#budget-title", budget_lines), ("#share-title", share_lines)):
+            title = "BUDGET vs SPENT" if pid == "#budget-title" else "WHERE IT WENT"
+            drawn = any(PRORATED_GLYPH in line for line in lines)
+            self.query_one(pid, Static).update(
+                f"{title}   {mark(f'{PRORATED_GLYPH} prorated', FAINT)}" if drawn else title
+            )
 
     def _fill_table(self, s) -> None:
         table = self.query_one("#money-table", DataTable)
