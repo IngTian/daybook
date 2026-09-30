@@ -66,6 +66,12 @@ def _described(row) -> str:
     return f"{row['description']} #{months}" if months else row["description"]
 
 
+# One declaration per panel, read by `compose` and by `_legend`. Written out in both places,
+# the second copy derived which panel it was from the widget id — and a title whose wording
+# depends on that mapping is a worse thing to own than the two strings it saved.
+_PANEL_TITLES = {"budget-title": "BUDGET vs SPENT", "share-title": "WHERE IT WENT"}
+
+
 def _coverage(d) -> str:
     """Which of a prepayment's months this share is: `#4/12`, or `#4-6/12` when the span is
     wide enough to catch several of them. Mirrors the `#12` on the charge's own row, so the
@@ -101,10 +107,14 @@ class MoneyTab(PanelTab):
         # part-to-whole ranking. v2 left this space empty.
         with Horizontal(classes="panel-row"):
             with Vertical(classes="panel", id="panel-budget"):
-                yield Static("BUDGET vs SPENT", classes="panel-title", id="budget-title")
+                yield Static(
+                    _PANEL_TITLES["budget-title"], classes="panel-title", id="budget-title"
+                )
                 yield Static(id="budget-body", classes="panel-body")
             with Vertical(classes="panel", id="panel-share"):
-                yield Static("WHERE IT WENT", classes="panel-title", id="share-title")
+                yield Static(
+                    _PANEL_TITLES["share-title"], classes="panel-title", id="share-title"
+                )
                 yield Static(id="share-body", classes="panel-body")
         yield Static(id="money-panes", classes="muted")
         yield DataTable(id="money-table", cursor_type="row")
@@ -257,16 +267,8 @@ class MoneyTab(PanelTab):
             "\n".join(share_lines) if share_lines else "  nothing spent in this window"
         )
 
-        # `▒` is a new glyph, so it gets named on screen — and only when one is drawn, so an
-        # ordinary month carries no legend it does not need. Each title asks its own panel,
-        # because the two can disagree: a category with spend and no cap draws no fill to
-        # segment, so BUDGET vs SPENT can have nothing to explain while WHERE IT WENT does.
-        for pid, lines in (("#budget-title", budget_lines), ("#share-title", share_lines)):
-            title = "BUDGET vs SPENT" if pid == "#budget-title" else "WHERE IT WENT"
-            drawn = any(PRORATED_GLYPH in line for line in lines)
-            self.query_one(pid, Static).update(
-                f"{title}   {mark(f'{PRORATED_GLYPH} prorated', FAINT)}" if drawn else title
-            )
+        self._legend("budget-title", budget_lines)
+        self._legend("share-title", share_lines)
 
     def _fill_table(self, s) -> None:
         table = self.query_one("#money-table", DataTable)
@@ -332,6 +334,19 @@ class MoneyTab(PanelTab):
                 )
                 self._ids.append(r["id"])
                 self._groups.append("")
+
+    def _legend(self, pid: str, lines: list[str]) -> None:
+        """Name `▒` beside the panel that drew one, and only when it did — an ordinary month
+        carries no legend for a glyph it never shows.
+
+        Asked of the rendered lines rather than of `CategorySpend.prorated`, because the two
+        genuinely disagree: a category with spend and no cap draws no fill to segment, so
+        BUDGET vs SPENT can have nothing to explain while WHERE IT WENT is 100% prorated.
+        """
+        title = _PANEL_TITLES[pid]
+        if any(PRORATED_GLYPH in line for line in lines):
+            title += f"   {mark(f'{PRORATED_GLYPH} prorated', FAINT)}"
+        self.query_one(f"#{pid}", Static).update(title)
 
     def _add_inflows(self, table, inflows, *, grouped: bool) -> None:
         """Prorated shares, pinned above the payments and marked as not being payments.

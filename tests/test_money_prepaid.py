@@ -582,5 +582,13 @@ async def test_the_glyph_is_named_on_screen_only_when_one_is_drawn(make_app, db,
         await type_into(pilot, "240 Insurance !subscriptions #12")
         await pilot.press("enter")
         await pilot.pause()
+        budget = _content(app, "#budget-title").plain
         share = _content(app, "#share-title").plain
     assert "▒ prorated" in share, f"named beside the panel that drew it: {share!r}"
+    # Each panel keeps its *own* title through the rewrite. `_legend` replaces the whole
+    # Static rather than appending to it, so a title looked up wrongly would silently rename
+    # a panel the moment a prepayment appeared — which is the drift `_PANEL_TITLES` exists to
+    # prevent, and nothing checked it until a mutant renamed WHERE IT WENT and every test
+    # still passed.
+    assert budget.startswith("BUDGET vs SPENT"), budget
+    assert share.startswith("WHERE IT WENT"), share
