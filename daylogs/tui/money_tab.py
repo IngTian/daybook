@@ -66,6 +66,28 @@ def _described(row) -> str:
     return f"{row['description']} #{months}" if months else row["description"]
 
 
+def _description_cell(row) -> Text:
+    """The description cell both pane modes use: `#N` if prepaid, then the note, dimmed.
+
+    One builder because the two modes had already drifted. Grouped mode rendered a bare
+    `description`, so `#N` vanished the moment `G` was pressed — and that marker is what the
+    prorate invariant leans on to stop a 240.00 row reading as a contradiction of a header
+    counting 20.00. Reproduced before fixing: the marker showed ungrouped and not grouped.
+
+    The note was settable, exported and round-tripped through the edit prefill, and displayed
+    nowhere; 48 of 234 real expenses carry one, naming which card paid. It is separated by a
+    two-space gap and *then* dimmed, in that order of importance: dim says "secondary", and
+    the gap is what still says "two fields" where dim does not render — colour is emphasis,
+    never the only signal. A falsy note adds nothing at all, which also covers the one row in
+    the real database holding `''` rather than NULL from before the write paths agreed.
+    """
+    cell = Text(_described(row))
+    note = row["note"] if "note" in row.keys() else None
+    if note:
+        cell.append(f"  {note}", style=FAINT)
+    return cell
+
+
 # One declaration per panel, read by `compose` and by `_legend`. Written out in both places,
 # the second copy derived which panel it was from the widget id — and a title whose wording
 # depends on that mapping is a worse thing to own than the two strings it saved.
@@ -313,7 +335,7 @@ class MoneyTab(PanelTab):
             self._add_inflows(table, inflows, grouped=False)
             for r in rows:
                 table.add_row(
-                    r["date"], Text(_described(r)), Text(r["category"]), fmt(r["amount"])
+                    r["date"], _description_cell(r), Text(r["category"]), fmt(r["amount"])
                 )
                 self._ids.append(r["id"])
                 self._groups.append("")
@@ -330,7 +352,7 @@ class MoneyTab(PanelTab):
             self._groups.append(slug)
             for r in children:
                 table.add_row(
-                    "", f"  {r['date']}", Text(r["description"]), fmt(r["amount"])
+                    "", f"  {r['date']}", _description_cell(r), fmt(r["amount"])
                 )
                 self._ids.append(r["id"])
                 self._groups.append("")
