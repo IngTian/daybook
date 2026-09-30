@@ -395,14 +395,14 @@ def test_the_arrow_and_the_colour_agree_about_zero():
 
 # ── a bar whose segments mean different things ────────────────────────────
 # A category's `spent` mixes cash that left this period with a share amortised from a
-# payment made elsewhere, and the panel said nothing: subscriptions read 116.75 / 192.21
-# as one green bar with 80.17 of the 116.75 being proration. The glyph is what tells them
+# payment made elsewhere, and the panel said nothing: a category read 30.00 / 50.00 as one
+# green bar with 20.00 of the 30.00 being proration. The glyph is what tells them
 # apart; the colour only emphasises it, which is why `shade` is a separate step applied
 # after the width arithmetic is already done.
 def test_shade_styles_the_run_without_changing_what_is_printed():
     from textual.content import Content
 
-    line = "subscriptions ▒▒▒███··· 116.75 / 192.21"
+    line = "subscriptions ▒▒▒███···  30.00 /  50.00"
     out = shade(line, "▒", "dim")
     assert out != line, "it has to actually do something"
     assert Content.from_markup(out).plain == line, (

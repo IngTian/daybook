@@ -305,9 +305,9 @@ appended prose where it was convenient rather than editing the map.
   displayed marker stays editable.
   **But the pane also pins the shares it is being counted at, above the payments.** Marking
   the charge `#12` only helps in the month the charge is *in*; in the other eleven the share
-  arrives with no row at all, so October's header read 72.81 over a list that summed to
-  nothing, and September's read 72.81 over rows saying 270.00 and 603.68. Both are the same
-  missing sentence — which payments are being counted here, and for how much — and "the
+  arrives with no row at all, so the second month's header read 20.00 over a list that summed
+  to nothing, and the charge's own month read 20.00 over a row saying 240.00. Both are the
+  same missing sentence — which payments are being counted here, and for how much — and "the
   marker stops that reading as a contradiction" was only ever true one month in twelve.
   `money.prepaid_inflows(conn, span)` is the one place that answers it: one entry per
   **charge**, not per covered month, since twelve lines for one subscription would bury the
@@ -324,8 +324,8 @@ appended prose where it was convenient rather than editing the map.
   rather than sorted or grouped in: a share has no date of its own to sort by, and inside a
   category group it would fold into a total that answers a cash question.
   **Both panels split the fill the same way**, because `spent` is two different quantities
-  added together and the panels are where the number is actually read: subscriptions showed
-  `116.75 / 192.21` as one green bar with 80.17 of it proration. `CategorySpend.prorated`
+  added together and the panels are where the number is actually read: a category showed
+  `30.00 / 50.00` as one green bar with 20.00 of it proration. `CategorySpend.prorated`
   carries the split and comes from `_prorated_by_category`, which sums **`prepaid_inflows`**
   rather than re-walking `_prepaid_shares` — the panel's segment and the rows the pane pins
   are then the same arithmetic, and two readers of one question is exactly how a total and
