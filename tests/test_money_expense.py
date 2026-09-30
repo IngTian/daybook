@@ -89,3 +89,55 @@ def test_delete_returns_row_for_undo(db):
     assert all_expenses(db) == []
     assert delete_expense(db, eid) is None
 
+
+
+# ── the note ─────────────────────────────────────────────────────────────
+def test_clearing_a_note_stores_null_not_an_empty_string(db):
+    """`""` is the clearing value, and it has to land the way a fresh add lands it.
+
+    `add_expense` normalises through `note or None`; `update_expense` dropped None and passed
+    `""` straight into the UPDATE, so a cleared note became `''` while a never-set one was
+    NULL. Two states that mean the same thing, and the real database has a row in the wrong
+    one. Invisible while nothing displayed notes — but `note IS NOT NULL` already counted it,
+    and a renderer would draw a present-but-blank note.
+    """
+    eid = _add(db, note="CIBC MC")
+    assert all_expenses(db)[0]["note"] == "CIBC MC"
+    update_expense(db, eid, note="")
+    assert all_expenses(db)[0]["note"] is None, "a cleared note must be indistinguishable"
+
+
+def test_an_added_empty_note_is_null_too(db):
+    """The path that was already right, pinned so the two stay agreed."""
+    _add(db, note="")
+    assert all_expenses(db)[0]["note"] is None
+
+
+def test_a_note_that_is_only_whitespace_clears_too(db):
+    """Submitting `~` with a space after it is the same intent as submitting nothing."""
+    eid = _add(db, note="CIBC MC")
+    update_expense(db, eid, note="   ")
+    assert all_expenses(db)[0]["note"] is None
+
+
+def test_not_mentioning_the_note_leaves_it_alone(db):
+    """The whole reason None is dropped: an edit writes only the fields it parsed, so a line
+    that says nothing about the note must not clear one."""
+    eid = _add(db, note="CIBC MC")
+    update_expense(db, eid, description="dinner")
+    row = all_expenses(db)[0]
+    assert (row["description"], row["note"]) == ("dinner", "CIBC MC")
+
+
+@pytest.mark.parametrize("raw", ["", "   ", "\t "])
+def test_both_write_paths_agree_on_an_empty_note(db, raw):
+    """Add and edit have to land the same state for the same input, or "has a note" stops
+    being a single question. They disagreed on whitespace before this: `note or None` keeps
+    `"   "` because it is truthy."""
+    added = _add(db, note=raw)
+    assert all_expenses(db)[0]["note"] is None, f"add stored {raw!r}"
+    edited = _add(db, note="CIBC MC", date="2026-08-28")
+    update_expense(db, edited, note=raw)
+    row = next(r for r in all_expenses(db) if r["id"] == edited)
+    assert row["note"] is None, f"edit stored {raw!r}"
+    assert added != edited

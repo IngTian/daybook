@@ -102,7 +102,10 @@ def add_expense(
             float(amount),
             description.strip(),
             check_category(category, cfg),
-            note or None,
+            # Stripped, not just falsy-checked, so this agrees with `update_expense`: a note
+            # of "   " is the same nothing as "" and must reach the column as NULL from
+            # either path. `description` a line above has always done this.
+            (note or "").strip() or None,
             _check_months(prepaid_months),
             _now(),
         ),
@@ -124,6 +127,15 @@ def update_expense(conn, id: int, cfg=None, **fields) -> bool:
         check_category(fields["category"], cfg)
     if "amount" in fields and float(fields["amount"]) == 0:
         raise MoneyError("amount must be non-zero")
+    if "note" in fields:
+        # `""` is the clearing value, and it has to land the way a fresh add lands it:
+        # `add_expense` normalises through `note or None`, while this dropped None and passed
+        # `""` into the UPDATE, so a *cleared* note became `''` and a never-set one NULL —
+        # two representations of one state, with a row in the real database in the wrong one.
+        # Kept in `fields` rather than dropped, because dropping it would mean "the line did
+        # not mention the note" and leave the old value in place. Whitespace clears too:
+        # submitting `~` with a space after it is the same intent as submitting nothing.
+        fields["note"] = fields["note"].strip() or None
     if "prepaid_months" in fields:
         # 0 is the clearing value, for the same reason "" is the note's: this function
         # drops None so it can tell "the line did not mention it" from "the line said
