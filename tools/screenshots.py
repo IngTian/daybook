@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """Render the README's three screenshots from a live app.
 
-    .venv/bin/python tools/screenshots.py
+    .venv/bin/python tools/screenshots.py            # assets/{day,body,money}.png
+    .venv/bin/python tools/screenshots.py --social   # assets/social-preview.png
 
 The venv's interpreter, not a bare `python`: this drives a real app, so it needs `textual`
 and an importable `daylogs`.
@@ -57,6 +58,17 @@ GENERATED_AT = int(dt.datetime(2026, 8, 30, 6, 12, tzinfo=TZ).timestamp())
 # 100x30 fits the two side-by-side panels without triggering the narrow layout,
 # and stays legible when GitHub scales the image down to the README's width.
 SIZE = (100, 30)
+
+# GitHub's social preview card wants 1280x640 — a 2:1 aspect, which nothing in the README
+# uses. A terminal cell in these SVGs is ~14 x 29.5 px, so 120 x 28 renders 1680 x 826,
+# an aspect of 2.03: close enough that cropping to exactly 2:1 loses a couple of pixels
+# rather than a row of content. 120 columns also stays clear of the 100-column `-narrow`
+# breakpoint, so the two panels sit side by side instead of stacking.
+#
+# Without this image every link to the repo — a message, a post, a search result — renders
+# a card with no picture, which for a TUI is the whole pitch thrown away.
+SOCIAL_SIZE = (120, 28)
+SOCIAL_WIDTH = 1280
 
 WEIGHTS = [71.9, 71.7, 71.6, 71.4, 71.5, 71.2, 71.1]
 
@@ -213,7 +225,20 @@ def _crop_to_aspect(png: Path, aspect: float) -> None:
     subprocess.run(["sips", "-c", str(target), str(width), str(png)], capture_output=True)
 
 
-def to_png(svg: Path, png: Path) -> bool:
+async def shoot_social(cfg, conn, out: Path) -> Path:
+    """The Day tab alone, at the social card's aspect. It is the tab that shows both
+    panels and the generated read, i.e. the most of the app in one frame."""
+    app = DaylogsApp(cfg, conn, now=lambda: NOW)
+    async with app.run_test(size=SOCIAL_SIZE) as pilot:
+        await pilot.pause()
+        await pilot.press("1")
+        await pilot.pause()
+        await pilot.pause()
+        app.save_screenshot("social-preview.svg", path=str(out))
+    return out / "social-preview.svg"
+
+
+def to_png(svg: Path, png: Path, width: int = 1400) -> bool:
     """Convert the SVG, using whichever converter this machine has.
 
     The README embeds PNG rather than the SVG, even though the SVG is smaller and
@@ -225,10 +250,10 @@ def to_png(svg: Path, png: Path) -> bool:
     that way.
     """
     candidates = [
-        ["rsvg-convert", "-w", "1400", str(svg), "-o", str(png)],
-        ["cairosvg", str(svg), "-o", str(png), "--output-width", "1400"],
+        ["rsvg-convert", "-w", str(width), str(svg), "-o", str(png)],
+        ["cairosvg", str(svg), "-o", str(png), "--output-width", str(width)],
         # macOS, needs no extra install.
-        ["qlmanage", "-t", "-s", "1400", "-o", str(svg.parent), str(svg)],
+        ["qlmanage", "-t", "-s", str(width), "-o", str(svg.parent), str(svg)],
     ]
     for cmd in candidates:
         # Each candidate is tried until one *works*, not until one exists: a
@@ -255,6 +280,7 @@ def to_png(svg: Path, png: Path) -> bool:
 
 
 def main() -> int:
+    social_only = "--social" in sys.argv
     ASSETS.mkdir(exist_ok=True)
     # The SVG is an intermediate, not an artifact: only the PNG the README
     # embeds is tracked, so the SVGs are rendered into a directory that goes
@@ -263,14 +289,22 @@ def main() -> int:
         work = Path(tmp)
         cfg, conn = seed(work)
         try:
-            svgs = asyncio.run(shoot(cfg, conn, work))
+            if social_only:
+                svgs = [asyncio.run(shoot_social(cfg, conn, work))]
+            else:
+                svgs = asyncio.run(shoot(cfg, conn, work))
         finally:
             conn.close()
 
         failed = []
         for svg in svgs:
             png = ASSETS / f"{svg.stem}.png"
-            if to_png(svg, png):
+            width = SOCIAL_WIDTH if svg.stem == "social-preview" else 1400
+            if to_png(svg, png, width=width):
+                if svg.stem == "social-preview":
+                    # Exactly 2:1. GitHub letterboxes anything else, which puts grey bars
+                    # through the middle of the card.
+                    _crop_to_aspect(png, 2.0)
                 print(f"  {png.relative_to(ROOT)}")
             else:
                 failed.append(png.name)

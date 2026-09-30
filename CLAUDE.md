@@ -580,6 +580,17 @@ appended prose where it was convenient rather than editing the map.
   test may spawn a subprocess.
 - **Parsers stay pure.** `parse.py` takes `now` as an argument. No test result
   may depend on when the suite runs.
+  **That rule is not self-enforcing, and it has failed six times.** The live shape of the
+  failure: a test seeds a dated row and reads it back through a window anchored on *today*,
+  so the calendar alone eventually moves the fixture out of view — `enter` then selects
+  nothing, no edit is armed, and the test passes while asserting nothing until the day it
+  fails. On 2026-09-28 eight weight tests broke at once, on a comment that had predicted
+  the row would leave Body's 1m window "on 2026-09-26". Two immunisations both work: pin
+  the app clock (`make_app(now=lambda: WEIGHT_DAY)`) or pin the viewing date
+  (`body.viewing_date = DAY`, which anchors the span directly). A dated fixture needs one
+  of them. CI runs **nightly** because of this: push-triggered CI cannot see a failure that
+  the passage of time caused — the last green run on main was thirteen days old while main
+  was red.
 - **stdlib `sqlite3`, not an ORM.** Measured: the SQLAlchemy/SQLModel stack
   cost 220 ms of import time for zero remaining consumers.
 - **`PRAGMA journal_mode=DELETE`, never WAL.** WAL sidecars sync independently
@@ -598,9 +609,11 @@ appended prose where it was convenient rather than editing the map.
 - Gate every change on `pytest -q` **and** `ruff check .`.
 - `docs/` is gitignored — a local paper trail (specs, plans, closing notes),
   not part of the repo.
-- **The repo is written open-source-clean.** It is private today and may be
-  published. No real weights, amounts, names, or `/Users/<name>/` paths in
-  tracked files. Category slugs and `America/Toronto` are feature-domain
+- **The repo is written open-source-clean.** It **is** published — public on GitHub and
+  on PyPI since 0.2.0 — so this is no longer a precaution about a possible future. No real
+  weights, amounts, names, or `/Users/<name>/` paths in
+  tracked files. Note the sdist carries the full source, so anything committed is public
+  whatever the GitHub setting says. Category slugs and `America/Toronto` are feature-domain
   values, not personal data. Fixtures use round, obviously-fake numbers.
 - Verify dependency changes in a clean env, not just the local `.venv`. A
   dependency that happens to be installed locally but is missing from
