@@ -6,11 +6,11 @@ suite, and every example shown to the user is parsed to prove it is valid.
 """
 
 import datetime as dt
-import inspect
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
 import pytest
+from conftest import call_parser
 
 from daylogs.categories import slugs
 from daylogs.parse import (
@@ -98,26 +98,12 @@ def test_every_hint_has_both_an_example_and_a_grammar():
         assert h.grammar.strip(), f"{h.label} has no grammar"
 
 
-def _call(parser, example):
-    """Call `parser` with only the keyword arguments it actually declares.
-
-    These loops used to pass `now=` and `known_slugs=` to every parser, which is what forced
-    all eight to carry both whether they read them or not — five did not, and one of those
-    (`parse_budget`'s `now`) invited writing a budget to the wrong month. Filtering on the
-    signature keeps the loop generic without dictating the signatures, and cannot go stale
-    the way a hand-maintained per-parser table would.
-    """
-    accepts = inspect.signature(parser).parameters
-    kw = {k: v for k, v in (("now", NOW), ("known_slugs", slugs())) if k in accepts}
-    return parser(example, **kw)
-
-
 @pytest.mark.parametrize("label", sorted(PARSERS))
 def test_every_example_is_a_line_the_parser_accepts(label):
     """An example a reader copies verbatim must work. Otherwise the hint is worse
     than no hint."""
     hint = hints.for_label(label)
-    _call(PARSERS[label], hint.example)
+    call_parser(PARSERS[label], hint.example, now=NOW, known_slugs=slugs())
 
 
 @pytest.mark.parametrize("label", sorted(PLAIN_PARSERS))

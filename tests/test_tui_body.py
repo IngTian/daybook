@@ -455,7 +455,7 @@ async def test_x_deletes_a_weight_row_in_weight_mode(make_app, db):
     assert list_weight(db) == []
 
 
-async def test_weight_series_renders_a_braille_chart(make_app, db):
+async def test_the_weight_series_renders_a_braille_chart(make_app, db):
     for day, kg in [("2026-08-25", 79.0), ("2026-08-26", 78.6), ("2026-08-27", 78.2)]:
         add_weight(db, kg=kg, date=day, at=int(day[-2:]))
     app = make_app()

@@ -6,11 +6,11 @@ silently corrupted rows.
 """
 
 import datetime as dt
-import inspect
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
 import pytest
+from conftest import call_parser
 
 from daylogs.categories import slugs
 from daylogs.parse import (
@@ -98,9 +98,7 @@ def test_readme_example_parses(prompt: str, example: str) -> None:
 
     # Only the keyword arguments each parser declares — five parsers do not take one of
     # these, and hard-coding both is what kept those five parameters alive unread.
-    accepts = inspect.signature(parser).parameters
-    kw = {k: v for k, v in (("now", NOW), ("known_slugs", slugs())) if k in accepts}
-    result = parser(example, **kw)
+    result = call_parser(parser, example, now=NOW, known_slugs=slugs())
 
     # Assert parsed fields match the sigils present in the example.
     if "!grocery" in example:

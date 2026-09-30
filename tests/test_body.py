@@ -64,7 +64,7 @@ def test_list_weight_newest_first_and_since_filter(db):
     assert [r["kg"] for r in list_weight(db, since="2026-08-25")] == [78.2]
 
 
-def test_weight_series_one_point_per_day_first_reading_wins(db):
+def test_one_point_per_day_and_the_first_reading_wins(db):
     """Collapsing at all keeps a curious re-check from becoming a second point. Keeping
     the *first* is what makes the survivor comparable across days: the fasted reading,
     before food and water. See tests/test_weight_of_a_day.py for why it changed."""
@@ -86,7 +86,7 @@ def test_weight_delta_excludes_rows_outside_the_window(db):
     assert weight_delta(db, end_date="2026-08-27", days=90) == -11.8, "and inside at 90d"
 
 
-def test_weight_series_empty_when_no_data(db):
+def test_the_series_is_empty_when_no_data(db):
     assert weight_series_between(db, start="2026-07-29", end="2026-08-27") == []
 
 

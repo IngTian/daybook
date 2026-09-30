@@ -2,7 +2,7 @@ import sqlite3
 
 import pytest
 
-from daylogs.db import SCHEMA_VERSION, TABLES, connect, ensure_schema
+from daylogs.db import SCHEMA_VERSION, TABLES, connect, ensure_schema, table_names
 
 
 def _tables(conn):
@@ -31,16 +31,19 @@ def test_journal_mode_is_delete_not_wal(db):
 
 def test_the_schema_declares_no_foreign_keys(db):
     """Replaces `test_foreign_keys_enforced`, which asserted `PRAGMA foreign_keys == 1` — a
-    circular check whose *name* claimed an enforcement the schema never had. This asks the
-    question the old name promised to answer, and it is the assertion that would fail if a
-    future table grew a REFERENCES clause without the pragma coming back with it."""
-    tables = [
-        r[0]
-        for r in db.execute(
-            "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'"
-        )
-    ]
-    assert len(tables) == 7, tables
+    circular check whose *name* claimed an enforcement the schema never had.
+
+    This is why `connect` no longer sets that pragma: there is nothing for it to enforce.
+    It does *not* observe the pragma, so it cannot tell you the pragma came back — a table
+    that grows a REFERENCES clause fails here either way, which is the point. That failure is
+    the signal to decide deliberately whether the constraint should be enforced at runtime,
+    not to relax this assertion.
+
+    Uses `table_names`, the production helper, rather than a fourth copy of the
+    `sqlite_master` query this file already has two of.
+    """
+    tables = table_names(db)
+    assert sorted(tables) == sorted(TABLES), tables
     for t in tables:
         assert list(db.execute(f"PRAGMA foreign_key_list({t})")) == [], t
 
@@ -135,3 +138,6 @@ def test_the_version_stamp_only_ever_moves_forward(tmp_path):
     conn.execute(f"PRAGMA user_version={SCHEMA_VERSION - 1}")
     ensure_schema(conn)
     assert conn.execute("PRAGMA user_version").fetchone()[0] == SCHEMA_VERSION, "and forward"
+    # Closed like both neighbouring tmp_path tests: a held handle makes tmp_path cleanup
+    # raise on Windows, which is invisible on this machine.
+    conn.close()

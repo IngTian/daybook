@@ -334,9 +334,10 @@ def upsert_budget(
 
     `parse_budget` calls `_reject_unsupported(g, frozenset(["!"]))`, so typing `~lease` on a
     budget line *raises*; `render_budget` emits only `amount name !category`; the categories
-    pane's columns are category/budget/spent/Δ/6-mo. None of the four production call sites
-    passed it and neither did any test, and being keyword-only it could not be supplied
-    positionally by accident — there was no path from intent to a stored value.
+    pane's columns are category/budget/spent/Δ/6-mo. Neither production caller passed it
+    (`roll_month_budgets` and `MoneyTab._submit_budget`), nor did `tools/screenshots.py`, nor
+    any test, and being keyword-only it could not be supplied positionally by accident —
+    there was no path from intent to a stored value.
 
     The DDL column stays. Dropping it needs a table rewrite, which `_ADD_COLUMNS` correctly
     refuses to grow into, and a permanently-NULL column costs nothing. `export_csv` does

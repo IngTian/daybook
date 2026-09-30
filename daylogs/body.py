@@ -194,11 +194,13 @@ def kcal_average(conn, *, start: str | None, end: str) -> int | None:
 def weight_delta(conn, *, end_date: str, days: int) -> float | None:
     """Change across the window, first day's reading to last day's.
 
-    Goes through `weight_series_between` rather than a day-count helper of its own:
-    `weight_series_between` was a second copy of the same `MIN(measured_at)` collapse, differing
-    only in taking `days` instead of a start date and in not returning the timestamp.
-    Verified identical over 49 (end_date, days) combinations, including two readings on one
-    day, an exact `measured_at` tie, and rows just outside both bounds.
+    Goes through `weight_series_between` rather than a day-count helper of its own. There used
+    to be one — a `weight_series` taking `days` instead of a start date and not returning the
+    timestamp — and it was a second copy of the same `MIN(measured_at)` collapse. Equivalence
+    was checked before deleting it, over two readings on one day, an exact `measured_at` tie,
+    and rows just outside both bounds; `test_weight_delta_excludes_rows_outside_the_window`
+    is the part of that which a test can still re-derive, and it is the only assertion
+    anywhere that this day-count lower bound excludes rows.
     """
     series = weight_series_between(
         conn, start=_window_start(_check_date(end_date), days), end=end_date

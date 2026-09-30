@@ -1,9 +1,11 @@
 import datetime as dt
+import inspect
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
 import pytest
 
+from daylogs import parse
 from daylogs.categories import slugs
 from daylogs.fmt import hhmm
 from daylogs.parse import (
@@ -848,3 +850,42 @@ def test_the_time_is_rendered_in_the_zone_it_is_given():
     parser resolves in the configured one moved every edited row by the offset."""
     assert "07:05" in render_weigh(_weigh_row(), "America/Toronto")
     assert "11:05" in render_weigh(_weigh_row(), "UTC")
+
+
+# ── what each parser is allowed to be handed ─────────────────────────────
+# One table, because the loops in test_hints.py and test_readme.py now filter kwargs through
+# `inspect.signature` — which is what stops them dictating signatures, and also what means a
+# re-added parameter would be supplied again and pass silently. That matters most for
+# `parse_budget`: `b` must write to the month *on screen* (`_budget_month()`), so an unread
+# `now` sitting in that signature is an invitation to reach for the wrong one.
+_SIGNATURES = {
+    # `!` is rejected outright by these three, so a category vocabulary is unreachable.
+    "parse_weigh": {"now"},
+    "parse_food": {"now"},
+    "parse_activity": {"now"},
+    "parse_expense": {"now", "known_slugs"},
+    # No date field to resolve, so `now` would be unread.
+    "parse_budget": {"known_slugs"},
+    "parse_recurring": {"known_slugs"},
+    # Found by the completeness test below on its first run, which is the whole point of
+    # having it: `known_slugs` here is for rejecting a slug that already exists.
+    "parse_category": {"known_slugs"},
+    "parse_profile": set(),
+}
+
+
+@pytest.mark.parametrize("name,expected", sorted(_SIGNATURES.items()))
+def test_a_parser_takes_only_the_context_it_reads(name, expected):
+    fn = getattr(parse, name)
+    got = {k for k in inspect.signature(fn).parameters if k != "raw"}
+    assert got == expected, (
+        f"{name} declares {sorted(got)}, expected {sorted(expected)} — a parameter a parser "
+        "does not read is one a caller can wrongly believe is honoured"
+    )
+
+
+def test_the_table_covers_every_parser_that_exists():
+    """Otherwise a new parser could arrive with an unread parameter and this file would not
+    notice, which is the hole the table is here to close."""
+    public = {n for n in dir(parse) if n.startswith("parse_") and callable(getattr(parse, n))}
+    assert public == set(_SIGNATURES), f"untabled parsers: {sorted(public - set(_SIGNATURES))}"
