@@ -565,11 +565,12 @@ appended prose where it was convenient rather than editing the map.
   `test_hints.py`'s `NO_PARSER` as "a bare category", which is exactly the lie that file
   already records about `profile`, and it is what left an impossible example unchecked.
   A correcting prompt's grammar is the grammar of the thing it corrects.
-- **An edit line carries the columns its table displays, plus expense's write-only
-  note, minus four read-only columns named below.** What you can see is what you can
-  edit. Columns with no visible representation stay out of reach entirely — `created_at`
-  must survive an edit, so it is in neither the table nor the
-  line.
+- **An edit line carries the columns its table displays, minus four read-only columns named
+  below.** What you can see is what you can edit. Columns with no visible representation stay
+  out of reach entirely — `created_at` must survive an edit, so it is in neither the table nor
+  the line. This heading used to read "plus expense's write-only note": the note was the one
+  thing editable without being visible, which is the rule holding in one direction only. It is
+  displayed now, so the exception is gone rather than excused.
   **A *confirm* line carries the `@` it will write to, for the same reason an edit line
   does: it is re-parsed, and the grammar resolves an absent `@` to now.** `f pizza and
   salad @09-04/19:30` was offered back as `pizza and salad =850`, so accepting it wrote
@@ -599,10 +600,25 @@ appended prose where it was convenient rather than editing the map.
   inverted `morning_weight`/`latest_weight`. `restamp` compares the whole local **minute**,
   date included; comparing `%H:%M` alone is what made a date-only move look like nothing
   had changed.
-  Expense's `~note` is currently write-only (settable, faithfully
-  round-tripped through the edit prefill, displayed nowhere). An edit writes only
-  the fields it parsed. The submitted line is authoritative: drop the note words
-  and the note is cleared; submit unchanged and the note survives.
+  Expense's `~note` **is** displayed, which is what makes it an ordinary field rather than
+  the exception it used to be described as. In real use it names which card paid, and it was
+  settable, exported and round-tripped through the edit prefill while appearing nowhere — so
+  the "what you can see is what you can edit" rule held in one direction only. It renders
+  after the description with a **two-space gap and then `FAINT`**, in that order: dim says
+  secondary, and the gap is what still says *two fields* where dim does not render. No `~` on
+  screen — the sigil is grammar, not display, and `render_expense` still emits it.
+  `_description_cell` is the one builder both pane modes use, because they had already
+  drifted: grouped mode rendered a bare `description` and so dropped the `#N` marker
+  entirely, which is the marker the prorate invariant above leans on.
+  An edit writes only the fields it parsed. The submitted line is authoritative: drop the note
+  words and the note is cleared; submit unchanged and the note survives.
+  **Cleared means NULL, from either write path.** `add_expense` normalised through
+  `note or None` while `update_expense` dropped None and passed `""` into the UPDATE, so a
+  cleared note became `''` and a never-set one NULL — two representations of one state, with
+  a row in the wild in the wrong one. Both `.strip() or None` now, so `~` followed by a space
+  is the same nothing as `~` followed by nothing. A test asserted `note == ""` and had frozen
+  the wrong representation as expected behaviour, the same shape recorded above for
+  `test_fixing_the_category_does_not_loop_forever`; its name was always right.
   **Four** displayed columns are deliberately not in an edit line, each for its own
   reason, and they are the whole list — this said "the one displayed column" while naming
   recurring's `on`, which is how a reader was left to rediscover the other three.
