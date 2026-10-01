@@ -894,63 +894,32 @@ async def test_a_rejected_edit_leaves_nothing_on_the_undo_stack(make_app, db, ty
         popped = app.undo_stack.pop()
     assert popped is None
     assert list_weight(db)[0]["kg"] == 78.2
-async def test_escaping_a_weight_edit_does_not_corrupt_next_entry(make_app, db, type_into):
-    """If user arms a weight edit, presses escape, then submits a fresh entry,
-    that fresh entry must INSERT, not UPDATE the abandoned row."""
-    add_weight(db, kg=78.2, date="2026-08-27", at=1, note="original")
-    app = make_app(now=lambda: WEIGHT_DAY)  # see WEIGHT_DAY
-    async with app.run_test(size=(120, 30)) as pilot:
-        await go_body(pilot, app)
-        await pilot.press("shift+tab")
-        await pilot.press("enter")
-        await pilot.pause()
-        assert_armed(app, "body")
-        await pilot.press("escape")
-        await pilot.pause()
-        await pilot.press("w")
-        await type_into(pilot, "80.1 fresh")
-        await pilot.press("enter")
-        await pilot.pause()
-    rows = list_weight(db)
-    assert len(rows) == 2, "must have two weight rows"
-    assert any(r["kg"] == 78.2 and r["note"] == "original" for r in rows)
-    assert any(r["kg"] == 80.1 and r["note"] == "fresh" for r in rows)
+# ── abandoning an edit must not corrupt the next entry ───────────────────
+# Parametrized over the *route* only. There used to be four tests per tab, crossing route with
+# table, and the table axis cannot diverge: `cancel_editing` is `self._editing = None` on both
+# tabs and neither reads `_editing[0]`. The route axis is real and stays — `app.py`'s
+# `on_input_submitted` calls `_cancel_editing()` while `on_inline_prompt_cancelled` calls
+# `_cancel_editing(event.owner)`, different arguments through different handlers.
+#
+# `assert_armed` is load-bearing in both: without it a broken arming path sails past, every
+# assertion below passes for free, and the test proves nothing — which is exactly how the eight
+# originals were written, and why their clock pins are carried over rather than dropped.
 
 
-async def test_escaping_a_food_edit_does_not_corrupt_next_entry(make_app, db, type_into):
-    """If user arms a food edit, presses escape, then submits a fresh entry,
-    that fresh entry must INSERT, not UPDATE the abandoned row.
+@pytest.mark.parametrize("route", ["escape", "empty"])
+async def test_abandoning_a_body_edit_does_not_corrupt_the_next_entry(
+    make_app, db, type_into, route
+):
+    """Arm a weight edit, abandon it, then submit a fresh entry: it must INSERT, not UPDATE
+    the row that was armed.
 
-    The clock is pinned and the prompt is asserted open, because neither is
-    optional here: the food table filters by the viewing date, so an unpinned
-    `now` leaves it empty on any day but the seeded one, `enter` arms nothing,
-    and every assertion below still passes with the fix removed.
+    Clock pinned on `WEIGHT_DAY`, which is not optional: the weight table is filtered by the
+    window, so an unpinned `now` eventually empties it, `enter` arms nothing, and every
+    assertion below passes with the fix removed. `assert_armed` is the other half of that.
+
+    One table, both routes — see the note above. Food's arming is covered by
+    `test_enter_on_a_food_row_edits_it_in_place`.
     """
-    import datetime as dt
-
-    add_food(db, description="oatmeal", kcal=350, date="2026-08-28", at=1, source="labeled")
-    now = lambda: dt.datetime(2026, 8, 28, 9, 0)  # noqa: E731
-    app = make_app(now=now)
-    async with app.run_test(size=(120, 30)) as pilot:
-        await go_body(pilot, app)
-        await pilot.press("enter")
-        await pilot.pause()
-        assert_armed(app, "body")
-        await pilot.press("escape")
-        await pilot.pause()
-        await pilot.press("f")
-        await type_into(pilot, "salad =600 @2026-08-28")
-        await pilot.press("enter")
-        await pilot.pause()
-    rows = list_food(db, date="2026-08-28")
-    assert len(rows) == 2, "must have two food rows"
-    assert any(r["description"] == "oatmeal" and r["kcal"] == 350 for r in rows)
-    assert any(r["description"] == "salad" and r["kcal"] == 600 for r in rows)
-
-
-async def test_empty_submit_on_weight_edit_does_not_corrupt_next_entry(make_app, db, type_into):
-    """If user arms a weight edit, clears the line, submits empty, then submits a
-    fresh entry, that fresh entry must INSERT, not UPDATE the abandoned row."""
     add_weight(db, kg=78.2, date="2026-08-27", at=1, note="original")
     app = make_app(now=lambda: WEIGHT_DAY)  # see WEIGHT_DAY
     async with app.run_test(size=(120, 30)) as pilot:
@@ -959,43 +928,20 @@ async def test_empty_submit_on_weight_edit_does_not_corrupt_next_entry(make_app,
         await pilot.press("enter")
         await pilot.pause()
         assert_armed(app, "body")
-        app.prompt.value = ""
-        await pilot.press("enter")
+        if route == "escape":
+            await pilot.press("escape")
+        else:
+            app.prompt.value = ""
+            await pilot.press("enter")
         await pilot.pause()
         await pilot.press("w")
         await type_into(pilot, "80.1 fresh")
         await pilot.press("enter")
         await pilot.pause()
     rows = list_weight(db)
-    assert len(rows) == 2, "must have two weight rows"
+    assert len(rows) == 2, f"{route}: must have two weight rows, got {len(rows)}"
     assert any(r["kg"] == 78.2 and r["note"] == "original" for r in rows)
     assert any(r["kg"] == 80.1 and r["note"] == "fresh" for r in rows)
-
-
-async def test_empty_submit_on_food_edit_does_not_corrupt_next_entry(make_app, db, type_into):
-    """If user arms a food edit, clears the line, submits empty, then submits a
-    fresh entry, that fresh entry must INSERT, not UPDATE the abandoned row."""
-    import datetime as dt
-
-    add_food(db, description="oatmeal", kcal=350, date="2026-08-28", at=1, source="labeled")
-    now = lambda: dt.datetime(2026, 8, 28, 9, 0)  # noqa: E731
-    app = make_app(now=now)
-    async with app.run_test(size=(120, 30)) as pilot:
-        await go_body(pilot, app)
-        await pilot.press("enter")
-        await pilot.pause()
-        assert_armed(app, "body")
-        app.prompt.value = ""
-        await pilot.press("enter")
-        await pilot.pause()
-        await pilot.press("f")
-        await type_into(pilot, "salad =600 @2026-08-28")
-        await pilot.press("enter")
-        await pilot.pause()
-    rows = list_food(db, date="2026-08-28")
-    assert len(rows) == 2, "must have two food rows"
-    assert any(r["description"] == "oatmeal" and r["kcal"] == 350 for r in rows)
-    assert any(r["description"] == "salad" and r["kcal"] == 600 for r in rows)
 
 
 async def test_a_parse_error_during_edit_keeps_editing_armed(make_app, db, type_into):

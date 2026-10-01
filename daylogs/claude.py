@@ -15,10 +15,11 @@ from __future__ import annotations
 
 import asyncio
 import json
-import logging
 import os.path
 
-log = logging.getLogger(__name__)
+# No module logger: this file raises `ClaudeError` with the stderr tail embedded and lets the
+# caller decide whether that is worth recording. `summary.py` and `app.py` do, with their own.
+# A logger that has never logged reads as "errors here are reported" when they are not.
 
 CLAUDE_BIN = "claude"
 _STDERR_TAIL = 500

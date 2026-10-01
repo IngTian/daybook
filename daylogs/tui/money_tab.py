@@ -180,7 +180,19 @@ class MoneyTab(PanelTab):
         return f"{chips}    {mark('sort', FAINT)} {fields}"
 
     # ── rendering ────────────────────────────────────────────────────────
-    def reload(self) -> None:
+    def reload(self) -> money.MonthSummary:
+        """Redraw, and hand back the summary it drew from.
+
+        Returned rather than recomputed by the write paths: both used to call
+        `summarize_span` a second time over the same span and the same `today()` purely to read
+        one category's spent/delta for their toast. Two readers of one question is the failure
+        class recorded twice above — the `reveal`/`max` bug and the prorated header-vs-list bug
+        — so the toast now *cannot* disagree with the panel it sits under.
+
+        Not a performance change: `summarize_span` is 0.15 ms and CLAUDE.md says do not optimise
+        this layer. `body_tab` and `summary_tab` deliberately keep their own post-reload reads;
+        those are different queries, not the same one twice.
+        """
         v = self.view
         span = v.span()
         months = span.months()
@@ -234,6 +246,7 @@ class MoneyTab(PanelTab):
         self._fill_panels(s)
         self.query_one("#money-panes", Static).update(view_row(PANES, v.pane))
         self._fill_table(s)
+        return s
 
     def _no_budget_hint(self, months: list[str]) -> str:
         """Why there is no budget, and the one key that fixes it.
@@ -710,11 +723,7 @@ class MoneyTab(PanelTab):
             # `max` only ever moved the edge forward, so a backdated row was written and
             # then never shown.
             self.view.reveal(r.date)
-            self.reload()
-
-            s = money.summarize_span(
-                self.app.conn, span=self.view.span(), today=self.app.today()
-            )
+            s = self.reload()
             cat = next((c for c in s.by_category if c.category == r.category), None)
             # Always name the category: confirming *where it was filed* is the most
             # useful part, and it is the thing most likely to be wrong.
@@ -793,8 +802,7 @@ class MoneyTab(PanelTab):
             amount=r.amount,
             cfg=cfg,
         )
-        self.reload()
-        s = money.summarize_span(self.app.conn, span=self.view.span(), today=self.app.today())
+        s = self.reload()
         cat = next((c for c in s.by_category if c.category == r.category), None)
         spent = cat.spent if cat else 0.0
         left = (cat.delta if cat else r.amount)

@@ -129,7 +129,18 @@ def build_payload(conn, cfg, *, date: str) -> dict:
     next_kg = nxt["kg"] if nxt else None
 
     kcal_in = body.day_kcal(conn, date=date)
-    bmr = body.compute_bmr(cfg, same_kg, today=date)
+    # From the *same* reading `day_tdee` uses, which is `latest_weight` — not from `same_kg`.
+    # The prompt tells the model `tdee` is resting `bmr` scaled by `activity_factor`, and on a
+    # day weighed twice that was arithmetically false: `bmr` came from the fasted reading and
+    # `tdee` from the fed one. Reproduced 1.2 kg apart as 1800 x 1.2 = 2160 against a `tdee` of
+    # 2146 — a 14 kcal gap the payload disclosed nowhere, so the model was asked to reason from
+    # a relation its own numbers did not satisfy.
+    #
+    # `weight_kg` above stays the fasted reading on purpose: the temporal-framing paragraph
+    # rests on it being the weigh-in taken before any of the food listed. Only the BMR moves,
+    # to agree with the TDEE that is actually derived from it.
+    latest = body.latest_weight(conn, on_or_before=date)
+    bmr = body.compute_bmr(cfg, latest["kg"] if latest else None, today=date)
     # Through the data layer, not multiplied here, so the digest and the two panels
     # cannot report different maintenance for the same day.
     factor, factor_source = body.resolved_factor(conn, cfg, date=date)

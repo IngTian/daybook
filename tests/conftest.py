@@ -29,6 +29,29 @@ FROZEN_NOW = dt.datetime(2026, 9, 15, 12, 0)
 
 
 @pytest.fixture(autouse=True)
+def _logs_to_tmp(tmp_path, monkeypatch):
+    """Keep the suite out of the owner's real log directory.
+
+    `log.log_dir` resolves `Path.home() / ".daylogs" / "logs"` and takes a `root` nobody has
+    ever passed, so `__main__.main()`'s `setup_logging()` wrote to the live file — and
+    `tests/test_cli.py` calls `main([...])` twenty times. Measured by running that file alone:
+    the real `~/.daylogs/logs/daylogs.log` mtime moved, on a half-megabyte file the suite has
+    been appending to since August. `DAYLOGS_HOME` does not redirect it, deliberately, so
+    nothing in the test environment was keeping the two apart.
+
+    Patched at `log_dir` rather than by faking `HOME`: the env var also steers config
+    discovery, `uv`, and anything else reading the home directory, which is a much larger
+    blast radius than the one line that is wrong.
+
+    `setup_logging` also does `root_logger.handlers = [handler]`, so without this the handler
+    left behind points at the live file for the rest of the session.
+    """
+    from daylogs import log
+
+    monkeypatch.setattr(log, "log_dir", lambda root=None: tmp_path / "logs")
+
+
+@pytest.fixture(autouse=True)
 def _fast_pilot(monkeypatch):
     """Shorten Textual's idle-wait granularity for the whole suite.
 
