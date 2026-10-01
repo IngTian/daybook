@@ -304,3 +304,41 @@ def test_the_prompt_describes_burn_without_dropping_resting_bmr():
     assert "tdee" in SYSTEM_PROMPT
     assert "activity_source" in SYSTEM_PROMPT
     assert "BMR −<bmr>" in SYSTEM_PROMPT
+
+
+def test_bmr_and_tdee_come_from_the_same_reading_on_a_twice_weighed_day(db, tmp_path):
+    """The prompt asserts `tdee` is resting `bmr` scaled by `activity_factor`. That has to be
+    arithmetically true in the payload, or the model is told to reason from a relation the
+    numbers beside it do not satisfy.
+
+    It was not. `bmr` was computed from `morning_weight` (the fasted reading, which
+    `weight_kg` correctly reports) while `day_tdee` opens with `latest_weight` — so on a day
+    weighed twice the two came from different readings. Reproduced at 1.2 kg apart: `bmr` 1800
+    x 1.2 = 2160 against a `tdee` of 2146, a 14 kcal gap with nothing on screen or in the
+    payload disclosing it.
+
+    `weight_kg` deliberately stays the *fasted* reading: the prompt's temporal-framing
+    paragraph rests on it being the weigh-in taken before any of the food listed. Only the
+    BMR moves, to agree with the TDEE derived from it.
+    """
+    cfg = _cfg(tmp_path, height_cm=180.0, sex="male", birthday="1996-01-01", activity="desk")
+    add_weight(db, kg=82.0, date="2026-09-14", at=1_000)       # fasted, first
+    add_weight(db, kg=80.8, date="2026-09-14", at=20_000)      # fed, later
+    add_food(db, description="lunch", kcal=600, source="labeled", date="2026-09-14", at=5_000)
+
+    b = build_payload(db, cfg, date="2026-09-14")["body"]
+    assert b["weight_kg"] == 82.0, "the fasted reading is what the prompt's framing needs"
+    assert b["tdee"] == round(b["bmr"] * b["activity_factor"]), (
+        f"the prompt says tdee is bmr x factor: {b['bmr']} x {b['activity_factor']} "
+        f"= {round(b['bmr'] * b['activity_factor'])}, payload says {b['tdee']}"
+    )
+
+
+def test_a_once_weighed_day_is_unaffected(db, tmp_path):
+    """The common case, pinned so the fix above cannot be read as changing it: with one reading
+    a day, fasted and latest are the same row and every figure is what it was."""
+    cfg = _cfg(tmp_path, height_cm=180.0, sex="male", birthday="1996-01-01", activity="desk")
+    add_weight(db, kg=82.0, date="2026-09-14", at=1_000)
+    b = build_payload(db, cfg, date="2026-09-14")["body"]
+    assert b["weight_kg"] == 82.0
+    assert b["tdee"] == round(b["bmr"] * b["activity_factor"])

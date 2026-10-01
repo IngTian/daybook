@@ -785,114 +785,56 @@ async def test_the_pre_image_a_failed_undo_kept_still_applies(make_app, db, type
     )
 
 
-async def test_escaping_an_expense_edit_does_not_corrupt_next_entry(make_app, db, type_into):
-    """If user arms an expense edit, presses escape, then submits a fresh entry,
-    that fresh entry must INSERT, not UPDATE the abandoned row.
+# ── abandoning an edit must not corrupt the next entry ───────────────────
+# Parametrized over the *route* only. There used to be four tests per tab, crossing route with
+# table, and the table axis cannot diverge: `cancel_editing` is `self._editing = None` on both
+# tabs and neither reads `_editing[0]`. The route axis is real and stays — `app.py`'s
+# `on_input_submitted` calls `_cancel_editing()` while `on_inline_prompt_cancelled` calls
+# `_cancel_editing(event.owner)`, different arguments through different handlers.
+#
+# `assert_armed` is load-bearing in both: without it a broken arming path sails past, every
+# assertion below passes for free, and the test proves nothing — which is exactly how the eight
+# originals were written, and why their clock pins are carried over rather than dropped.
 
-    The clock is pinned and the prompt is asserted open, because the expense table
-    filters by month, so an unpinned `now` leaves it empty from Sept 1, `enter`
-    arms nothing, and the test passes with the fix removed.
+
+@pytest.mark.parametrize("route", ["escape", "empty"])
+async def test_abandoning_a_money_edit_does_not_corrupt_the_next_entry(
+    make_app, db, type_into, route
+):
+    """Arm an expense edit, abandon it, then submit a fresh entry: it must INSERT, not UPDATE
+    the row that was armed.
+
+    Clock pinned, which is not optional: the Money table defaults to MTD, so on an unpinned
+    clock an August row falls outside the window from September, `enter` arms nothing, and
+    every assertion below passes for free. `assert_armed` is the other half.
+
+    One table, both routes — see the note above. Recurring's distinctive path is its *retry*
+    through `upsert_recurring`, which is covered by
+    `test_enter_on_a_recurring_row_renames_without_duplicating` and the prompt-error tests,
+    not by abandonment.
     """
-    import datetime as dt
-
     add_expense(db, amount=12.0, description="original", category="restaurant", date="2026-08-28")
-    now = lambda: dt.datetime(2026, 8, 28, 9, 0)  # noqa: E731
-    app = make_app(now=now)
+    app = make_app(now=lambda: dt.datetime(2026, 8, 28, 9, 0))
     async with app.run_test(size=(120, 34)) as pilot:
         await go_money(pilot, app)
         await pilot.press("tab")
         await pilot.press("enter")
         await pilot.pause()
         assert_armed(app, "money")
-        await pilot.press("escape")
+        if route == "escape":
+            await pilot.press("escape")
+        else:
+            app.prompt.value = ""
+            await pilot.press("enter")
         await pilot.pause()
         await pilot.press("e")
         await type_into(pilot, "25 fresh !grocery")
         await pilot.press("enter")
         await pilot.pause()
     rows = all_expenses(db)
-    assert len(rows) == 2, "must have two expense rows"
+    assert len(rows) == 2, f"{route}: must have two expense rows, got {len(rows)}"
     assert any(r["description"] == "original" and r["amount"] == 12.0 for r in rows)
     assert any(r["description"] == "fresh" and r["amount"] == 25.0 for r in rows)
-
-
-async def test_escaping_a_recurring_edit_does_not_corrupt_next_entry(make_app, db, type_into):
-    """If user arms a recurring edit, presses escape, then submits a fresh entry,
-    that fresh entry must INSERT, not UPDATE the abandoned row."""
-    upsert_recurring(db, name="Original", cost=20, cycle="monthly", category="subscriptions")
-    app = make_app()
-    async with app.run_test(size=(120, 34)) as pilot:
-        await go_money(pilot, app)
-        await pilot.press("tab")
-        await pilot.press("tab")
-        await pilot.press("enter")
-        await pilot.pause()
-        assert_armed(app, "money")
-        await pilot.press("escape")
-        await pilot.pause()
-        await pilot.press("s")
-        await type_into(pilot, "10 Fresh !other")
-        await pilot.press("enter")
-        await pilot.pause()
-    rows = list_recurring(db)
-    assert len(rows) == 2, "must have two recurring rows"
-    assert any(r["name"] == "Original" and r["cost"] == 20 for r in rows)
-    assert any(r["name"] == "Fresh" and r["cost"] == 10 for r in rows)
-
-
-async def test_empty_submit_on_expense_edit_does_not_corrupt_next_entry(make_app, db, type_into):
-    """If user arms an expense edit, clears the line, submits empty, then submits a
-    fresh entry, that fresh entry must INSERT, not UPDATE the abandoned row.
-
-    The clock is pinned and the prompt asserted open: the Money table defaults to
-    MTD, so on an unpinned clock this row falls outside the window from September
-    and `enter` would arm nothing, passing every assertion below for free.
-    """
-    add_expense(db, amount=12.0, description="original", category="restaurant", date="2026-08-28")
-    now = lambda: dt.datetime(2026, 8, 28, 9, 0)  # noqa: E731
-    app = make_app(now=now)
-    async with app.run_test(size=(120, 34)) as pilot:
-        await go_money(pilot, app)
-        await pilot.press("tab")
-        await pilot.press("enter")
-        await pilot.pause()
-        assert_armed(app, "money")
-        app.prompt.value = ""
-        await pilot.press("enter")
-        await pilot.pause()
-        await pilot.press("e")
-        await type_into(pilot, "25 fresh !grocery")
-        await pilot.press("enter")
-        await pilot.pause()
-    rows = all_expenses(db)
-    assert len(rows) == 2, "must have two expense rows"
-    assert any(r["description"] == "original" and r["amount"] == 12.0 for r in rows)
-    assert any(r["description"] == "fresh" and r["amount"] == 25.0 for r in rows)
-
-
-async def test_empty_submit_on_recurring_edit_does_not_corrupt_next_entry(make_app, db, type_into):
-    """If user arms a recurring edit, clears the line, submits empty, then submits a
-    fresh entry, that fresh entry must INSERT, not UPDATE the abandoned row."""
-    upsert_recurring(db, name="Original", cost=20, cycle="monthly", category="subscriptions")
-    app = make_app()
-    async with app.run_test(size=(120, 34)) as pilot:
-        await go_money(pilot, app)
-        await pilot.press("tab")
-        await pilot.press("tab")
-        await pilot.press("enter")
-        await pilot.pause()
-        assert_armed(app, "money")
-        app.prompt.value = ""
-        await pilot.press("enter")
-        await pilot.pause()
-        await pilot.press("s")
-        await type_into(pilot, "10 Fresh !other")
-        await pilot.press("enter")
-        await pilot.pause()
-    rows = list_recurring(db)
-    assert len(rows) == 2, "must have two recurring rows"
-    assert any(r["name"] == "Original" and r["cost"] == 20 for r in rows)
-    assert any(r["name"] == "Fresh" and r["cost"] == 10 for r in rows)
 
 
 async def test_editing_an_expense_can_clear_its_note(make_app, db, type_into):
